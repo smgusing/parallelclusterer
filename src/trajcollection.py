@@ -1,5 +1,10 @@
 # for python2
-
+#####
+# This is a rewrite of original container class written by Alex.
+# The idea behind this class is to serve as a data container for multiple trajectories 
+# and impliment methods that aid in processing of multiple trajectories in parallel using mpi4py  
+#
+####
 # Built-in modules
 import ctypes
 from itertools import chain, izip
@@ -22,7 +27,7 @@ CtypesFloatPtr = ctypes.POINTER(ctypes.c_float)
 MPIFloat = MPI.FLOAT
 
 
-class Container():
+class Trajcollection():
     """
     A class to facilitate handling of strided trajectory data.
     For distributed programs (using mpi4py).
@@ -46,6 +51,10 @@ class Container():
         The basic instantiator.
         It instantiates all the fields of the object (only to have them all declared in a single place).
         No other instantiator (or method) should instantiate any new fields.
+        
+        Parameters: globalIDs: 
+        
+        
         """
         self.globalIDs = globalIDs # A map from localIDs (array indices) to globalIDs :: numpy.ndarray(np.int32)
         self.localIDs  = localIDs # A map from globalIDs to localIDs (array indices) :: Python Dict
