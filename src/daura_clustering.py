@@ -26,8 +26,8 @@ import logging
 import parallelclusterer
 
 from project import Project
-import container; Container = container.Container # need to change where the type definitions are held.
-import parallel
+from framecollection import Framecollection
+from loadmanager import Loadmanager 
 from rms_metric import Metric
 
 # Scrappy implementations
@@ -39,20 +39,6 @@ logger = logging.getLogger(__name__)
 # ================================================================
 # Helper functions which I found that I needed
 # which, later, may need to be put into some classes.
-
-def make_half_ring_schedule(size):
-    return [ (i, i+(size/2)) for i in xrange(size/2) ]
-    
-
-def find_node_of_frame(frameID, frame_globalID_distribution):
-
-    for node_id, frame_ranges in enumerate(frame_globalID_distribution):
-        for frame_range in frame_ranges:
-            low, high = frame_range
-            if low <= frameID < high:
-                return node_id
-
-    return None
 
 lfunc = {"INFO":logger.info,"DEBUG":logger.debug,
               "WARN":logger.warning,"ERROR":logger.error}
@@ -79,13 +65,12 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
 
     # ================================================================
     # Instantiation of helper classes.
-
+    
     # Initialize MPI.
     comm = MPI.COMM_WORLD
     mpi_size = comm.Get_size()
     my_rank = comm.Get_rank()
     comm.Barrier()
-
     # Print only at node 0.
 #     def my_print(x):
 #         print x
@@ -95,75 +80,32 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
     print0(rank=my_rank,msg="Initialized MPI.")
     logger.debug("Hello, from node %s",my_rank)
 
-    # Load project file.
-    print0(rank=my_rank,msg="Reading project yaml file.")
-    my_project = Project(existing_project_file = project_filepath)
-
-
-    # Instantiate Metric class.
-    if my_rank == 0:
-        my_metric = Metric(tpr_filepath = my_project.get_tpr_filepath(),
-                           stx_filepath = my_project.get_gro_filepath(),
-                           ndx_filepath = my_project.get_ndx_filepath(),
-                           number_dimensions = my_project.get_number_dimensions() )
-        
-        my_metric.destroy_pointers()
-    else:
-        my_metric = None
-
-    my_metric = comm.bcast(my_metric, root=0)
-    print0(rank=my_rank,msg="metric object broadcasted.")
-
-    my_metric.create_pointers()
-
-
-    # ----------------------------------------------------------------
-    # Divide trajectories between nodes.
-    # Get trajectory data.
-
-    # Read.
-    trajectory_lengths = my_project.get_trajectory_lengths()
-    trajectory_filepaths = my_project.get_trajectory_filepaths()
+    logger.info("Reading project file at node %s",my_rank)
+    project = Project(existing_project_file = project_filepath)
     
-    # Offests and Ranges.
-    cumulative_sum = lambda xs: functional.scanl(lambda x,y: x+y, xs)
-
-    trajectory_ID_offsets = [0] + cumulative_sum(trajectory_lengths)[:-1]
-    trajectory_ID_ranges = zip(trajectory_ID_offsets, cumulative_sum(trajectory_lengths))
-
-    # Divide work.
-    costs = trajectory_lengths
-    items = zip(trajectory_filepaths, trajectory_lengths,
-                trajectory_ID_offsets, trajectory_ID_ranges)
-
-    print0(rank=my_rank,msg="Dividing trajectories between nodes.")
-    cost_sums, partitions = parallel.divide_work(mpi_size, costs, items)
-    # partitions :: [[(a,b,..)]]
-
-    transpose = lambda xs: zip(*xs)
-    transposed_partitions = map(transpose, partitions)
-    # transposed_partitions :: [([a0, a1, ...], [b0, b1, ...], ..)] # (conceptually)
-
-    (parts_trajectory_filepaths, parts_trajectory_lengths, \
-        parts_trajectory_ID_offsets, parts_trajectory_ID_ranges) = \
-        map(list, zip(*transposed_partitions))
-
+    manager = Loadmanager(project.get_trajectory_lengths(),
+                          project.get_trajectory_filepaths(),
+                          mpi_size,my_rank)
+    
+    metric = Metric(tpr_filepath = project.get_tpr_filepath(),
+                   stx_filepath = project.get_gro_filepath(),
+                   ndx_filepath = project.get_ndx_filepath(),
+                   number_dimensions = project.get_number_dimensions() )
+    
+    manager.do_partition()
+    
+    
     # Take work share.
-    my_partition = transposed_partitions[my_rank]
+    my_partition = manager.get_myworkshare()
     
     (my_trajectory_filepaths, my_trajectory_lengths, \
-        my_trajectory_ID_offsets, my_trajectory_ID_ranges) = \
-        map(list, my_partition)
+     my_trajectory_ID_offsets, my_trajectory_ID_ranges) = \
+     map(list, my_partition)
 
-    # Record the range of frames assigned to each node.
-    # (Lower bound is inclusive, upper bound is exclusive.)
-    # Only valid if contiguous_divide_work groups the trajectories in contiguous ranges.
-    # Note that when striding != 1 this is not a contiguous range of frames that a node stores.
-    frame_globalID_distribution = list(parts_trajectory_ID_ranges)
 
     #print0(my_rank,"\tDistribution: {0}".format(frame_globalID_distribution))
     logger.info("Reading trajectories at %s",my_rank)
-    my_container = Container.from_files(
+    my_frames = Framecollection.from_files(
             stride = my_project.get_stride(),
             trajectory_type = my_project.get_trajectory_type(),
             trajectory_globalID_offsets = my_trajectory_ID_offsets,
@@ -174,10 +116,10 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
     # ----------------------------------------------------------------
     # Preprocess trajectories (modifying them in-place).
     # Metric preprocessing.
-#    print0(my_rank,"[Cluster] Preprocessing trajectories (for Metric).")
-#    my_metric.preprocess(   frame_array_pointer = my_container.get_first_frame_pointer(),
-#                            number_frames = my_container.get_number_frames(),
-#                            number_atoms = my_container.get_number_atoms(), )
+    logger.debug(" Preprocessing trajectories at rank %s",my_rank)
+    metric.preprocess( frame_array_pointer = my_frames.get_first_frame_pointer(),
+                       number_frames = my_frames.number_frames,
+                       number_atoms = my_frames.number_atoms)
 
 
     # ================================================================
@@ -192,7 +134,7 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
         print0(rank=my_rank,msg="Counting 'neighbours' for all frames.")
 
         my_neighbour_count = allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank,
-                                my_metric, my_container) # :: Map Integer Integer
+                                metric, my_frames) # :: Map Integer Integer
 
         print0(rank=my_rank,msg="Synchronizing neighbour counts.")
         neighbour_count_recvList = comm.allgather(my_neighbour_count)
