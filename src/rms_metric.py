@@ -7,14 +7,14 @@ import ctypes
 # external modules.
 import numpy as np
 import gp_grompy
-# gp_tools/alex_tools
 import parallelclusterer
 from parallelclusterer import cmetric 
-
+import logging
 # Instantiate helper classes.
 gmstx = gp_grompy.Gmstx()
 gmndx = gp_grompy.Gmndx()
 
+logger = logging.getLogger(__name__)
 
 
 
@@ -82,7 +82,7 @@ class Metric():
         # ...The second group specifies the atoms of frames which will be aligned in rotation fitting.
         self.fitting_size = gmndx.isize[1]
 
-
+        logger.debug("Fitting group size: %s Rms Group size: %s",self.fitting_size,self.rms_size)
         # Copy indices, atom masses from the GROMACS files into our arrays...
         self.rms_indices = np.empty(self.rms_size, dtype=np.int32)
         self.fitting_indices = np.empty(self.fitting_size, dtype=np.int32)
@@ -96,28 +96,25 @@ class Metric():
             j = gmndx.index[1][i]
             self.fitting_indices[i] = j
             
-        if tpr_filepath is not None:
-	    
+        if os.path.isfile(tpr_filepath):
             # Read topology file.
-            #gmstx.read_stx(tpr_filepath)
-            #topology = gmstx.top
-            #self.rms_weights = np.zeros(gmstx.natoms, dtype=np.float32)
-            #self.fitting_weights = np.zeros(gmstx.natoms, dtype=np.float32)
+            gmstx.read_tpr(tpr_filepath)
+            
+            self.rms_weights = np.zeros(gmstx.natoms, dtype=np.float32)
+            self.fitting_weights = np.zeros(gmstx.natoms, dtype=np.float32)
             
             # ... for group 1 (rmsd)
-            #for i in xrange(self.rms_size):
-            #    j = self.rms_indices[i]
-            #    self.rms_weights[j] = gmstx.top.atoms.atom[j].m # (m)ass
+            for i in xrange(self.rms_size):
+                j = self.rms_indices[i]
+                self.rms_weights[j] = gmstx.top.atoms.atom[j].m # (m)ass
     
             # ... for group 2 (rotation fitting)
-            #for i in xrange(self.fitting_size):
-            #    j = self.fitting_indices[i]
-            #    self.fitting_weights[j] = gmstx.atoms.atom[j].m # (m)ass
-            self.rms_weights = np.ones(gmstx.natoms, dtype=np.float32)
-            self.fitting_weights = np.ones(gmstx.natoms, dtype=np.float32)
+            for i in xrange(self.fitting_size):
+                j = self.fitting_indices[i]
+                self.fitting_weights[j] = gmstx.atoms.atom[j].m # (m)ass
 
         else:
-            print "[rms_metric] using mass of unity"
+            logger.info("No tprfile found will use mass of unity and grofile")
             gmstx.read_stx(stx_filepath)
             self.rms_weights = np.ones(gmstx.natoms, dtype=np.float32)
             self.fitting_weights = np.ones(gmstx.natoms, dtype=np.float32)
@@ -168,16 +165,16 @@ class Metric():
     # ================================================================
     # Methods for computation of the metric.
 
-#    def preprocess(self, frame_array_pointer, number_frames, number_atoms):
-#        """
-#        Translates a frame's atoms so that the center of mass is the origin.
-#        (In-place modification.)
-#        """
-#
-#        cmetric.parallelFor_removeCenterOfMass( # C function.
-#            frame_array_pointer, number_frames, number_atoms, self.number_dimensions,
-#            self.fitting_size, self.fitting_indices_ptr, self.fitting_weights_ptr)
-#
+    def preprocess(self, frame_array_pointer, number_frames, number_atoms):
+        """
+        Translates a frame's atoms so that the center of mass is the origin.
+        (In-place modification.)
+        """
+
+        cmetric.parallelFor_removeCenterOfMass( # C function.
+            frame_array_pointer, number_frames, number_atoms, self.number_dimensions,
+            self.fitting_size, self.fitting_indices_ptr, self.fitting_weights_ptr)
+
 
     def compute_distances(self, reference_frame_pointer, frame_array_pointer,
                             number_frames, number_atoms, real_output_buffer,

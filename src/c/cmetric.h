@@ -106,20 +106,20 @@ void manyToMany_countWithinRmsd(
     rvec *frame_array0, int *count_buffer0, int frame_array_size0,
     rvec *frame_array1, int *count_buffer1, int frame_array_size1);
 
+/* Old functions. */
 void distance_onetomany(
     rvec *reference_frame, rvec *frame_array, int frame_array_size, int number_atoms, int ndim,
     real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size, real *rmsd);
 
-/* Old functions. 
 int count_neighbours_onetomany(
     rvec *reference_frame, rvec *frame_array, int frame_array_size, int number_atoms, int ndim,
     real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size, real cutoff);
-*/
+
 // ================================================================
 /* Gromacs function declarations. */
 
 /* Computes the least-rmsd-fit rotation matrix to fit 'x' to 'xp'. */
-//void calc_fit_R(int ndim, int natoms, real *w_rls, rvec *xp, rvec *x, matrix R);
+void calc_fit_R(int ndim, int natoms, real *w_rls, rvec *xp, rvec *x, matrix R);
 
 /* Computes the root-mean-squared deviaiton between 'x' and 'xp' for atoms in 'index'.*/
 real rmsdev_ind(int nind, atom_id index[], real mass[], rvec x[], rvec xp[]);

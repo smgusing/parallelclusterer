@@ -1,7 +1,7 @@
 """
 In-Progress: (not yet started).
 - Switch to arrays of localIDs to store neighbour counts.
-    - When needed, 'translate' them to globalIDs using Container.get_globalIDs_iter().
+    - When needed, 'translate' them to globalIDs using Container.globalIDs_iter.
     - Rework allToAll_neighbourCount first.
     - ! Decided: using arrays complicates things, since dicionaries are so simple.
                  implement them after more important things,
@@ -14,25 +14,22 @@ In-Progress: (not yet started).
 from mpi4py import MPI
 import gp_grompy
 # Built-in modules.
-import sys
+
 import ctypes
 import numpy as np
 import itertools
 import cPickle
-import txtreader
+
 from time import time       
 import logging
 # Project modules.
-import parallelclusterer
 
 from project import Project
 from framecollection import Framecollection
 from loadmanager import Loadmanager 
 from rms_metric import Metric
 
-# Scrappy implementations
-import functional
-#from my_heap import MaxHeap
+
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +83,21 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
     manager = Loadmanager(project.get_trajectory_lengths(),
                           project.get_trajectory_filepaths(),
                           mpi_size,my_rank)
-    
-    metric = Metric(tpr_filepath = project.get_tpr_filepath(),
-                   stx_filepath = project.get_gro_filepath(),
-                   ndx_filepath = project.get_ndx_filepath(),
-                   number_dimensions = project.get_number_dimensions() )
+    # metric has to be instantiated by only one mpi process as it needs user input
+    # ie index groups
+    if my_rank == 0: 
+        metric = Metric(tpr_filepath = project.get_tpr_filepath(),
+                       stx_filepath = project.get_gro_filepath(),
+                       ndx_filepath = project.get_ndx_filepath(),
+                       number_dimensions = project.get_number_dimensions() )
+        # since we have to broadcast it we need to destroy all pointers to arrays
+        metric.destroy_pointers()
+    else:
+        metric = None
+    metric =  comm.bcast(metric, root = 0)
+    print0(rank=my_rank,msg="metric object broadcasted.")
+    # recreate all pointers in the object's instance
+    metric.create_pointers()
     
     manager.do_partition()
     
@@ -106,8 +113,8 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
     #print0(my_rank,"\tDistribution: {0}".format(frame_globalID_distribution))
     logger.info("Reading trajectories at %s",my_rank)
     my_frames = Framecollection.from_files(
-            stride = my_project.get_stride(),
-            trajectory_type = my_project.get_trajectory_type(),
+            stride = project.get_stride(),
+            trajectory_type = project.get_trajectory_type(),
             trajectory_globalID_offsets = my_trajectory_ID_offsets,
             trajectory_filepath_list = my_trajectory_filepaths,
             trajectory_length_list = my_trajectory_lengths, )
@@ -134,7 +141,7 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
         print0(rank=my_rank,msg="Counting 'neighbours' for all frames.")
 
         my_neighbour_count = allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank,
-                                metric, my_frames) # :: Map Integer Integer
+                                metric, my_frames,manager) # :: Map Integer Integer
 
         print0(rank=my_rank,msg="Synchronizing neighbour counts.")
         neighbour_count_recvList = comm.allgather(my_neighbour_count)
@@ -157,8 +164,8 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
     T=time()
 
     clusters = daura_clustering(neighbour_counts,
-                    cutoff, comm, mpi_size, my_rank, frame_globalID_distribution,
-                    my_metric, my_container, checkpoint_filepath)
+                    cutoff, comm, mpi_size, my_rank, manager, 
+                    metric, my_frames, checkpoint_filepath)
     
     print0(rank=my_rank,msg=" Finished ... Total time: {0}".format(time()-T))
 
@@ -169,7 +176,7 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
 
 # --------------------------------------------------------------------------------------------------------
 
-def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, my_metric, my_container):
+def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, metric, my_frames, manager):
     """
     The load is divided differently based on whether mpi_size is even or odd
     In case of odd:
@@ -181,55 +188,60 @@ def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, my_metric, my_conta
     """
 
     # Init for my frames.
-    my_neighbour_count = dict(( (x, 0) for x in my_container.get_globalIDs_iter() ))
-
+    my_neighbour_count = dict(( (x, 0) for x in my_frames.globalIDs_iter ))
+    
 
     print0(rank=my_rank,msg=" All-to-all: Round %s of %s"%(1, (mpi_size+1)/2))
 
     T = time()
-    
+    # if odd
     if mpi_size % 2 == 1:
         logger.debug("Single Inner neighbour counting at rank %s",my_rank)
-        innerNeighbourCount(my_metric, cutoff, my_neighbour_count, my_container)
+        innerNeighbourCount(metric, cutoff, my_neighbour_count, my_frames)
 
     else:
-        mpi_send_lambda = my_container.mpi_send_lambda(comm)
-        mpi_recv_lambda = Container.mpi_recv_lambda(comm)
+        my_received_frames = Framecollection()
+        mpi_send_lambda = my_frames.for_sending(comm)
+        mpi_recv_lambda = my_received_frames.for_receiving(comm)
 
-        ring_schedule_k = parallel.make_ring_schedule(mpi_size, mpi_size/2)
-        other_container = parallel.run_schedule(ring_schedule_k, my_rank,
+        ring_schedule_k = manager.make_ring_schedule(mpi_size/2)
+        
+        ## This should be abstracted ie collection class must have send and receive
+        ## implmented to work with manager
+        manager.run_schedule(ring_schedule_k, my_rank,
                                                 mpi_send_lambda, mpi_recv_lambda)
 
         other_rank = (my_rank + mpi_size/2) % mpi_size
-
+        
+        # One with the lower rank does self comparisons for both
         if my_rank < other_rank:
             logger.debug("Two Inner neighbour counting at rank %s",my_rank)
-            innerNeighbourCount(my_metric, cutoff, my_neighbour_count, my_container)
-            innerNeighbourCount(my_metric, cutoff, my_neighbour_count, other_container)
+            innerNeighbourCount(metric, cutoff, my_neighbour_count, my_frames)
+            innerNeighbourCount(metric, cutoff, my_neighbour_count, my_received_frames)
         else:
             logger.debug(" Outer neighbour counting at rank %s",my_rank)
-            outerNeighbourCount(my_metric, cutoff, my_neighbour_count, my_container, other_container)
+            outerNeighbourCount(metric, cutoff, my_neighbour_count, my_frames, my_received_frames)
 
     for k in xrange(1, (mpi_size+1)/2):
         T = time()
-        #print0(my_rank,"[Outer1] All-to-all: Round {0}/{1}".format(k+1, (mpi_size+1)/2))
+        my_recieved_frames = Framecollection()
+        mpi_send_lambda = my_frames.for_sending(comm)
+        mpi_recv_lambda = my_recieved_frames.for_receiving(comm)
 
-        mpi_send_lambda = my_container.mpi_send_lambda(comm)
-        mpi_recv_lambda = Container.mpi_recv_lambda(comm)
 
-        ring_schedule_k = parallel.make_ring_schedule(mpi_size, k)
-        other_container = parallel.run_schedule(ring_schedule_k, my_rank,
+        ring_schedule_k = manager.make_ring_schedule(k)
+        manager.run_schedule(ring_schedule_k, my_rank,
                                                 mpi_send_lambda, mpi_recv_lambda)
 
-        logger.debug("Outer neighbour counting at rank %s %d",my_rank,k)
-        outerNeighbourCount(my_metric, cutoff, my_neighbour_count, my_container, other_container)
+        logger.debug("Outer neighbour counting at rank %s round %d",my_rank,k)
+        outerNeighbourCount(metric, cutoff, my_neighbour_count, my_frames, my_received_frames)
         
     logger.info("all-to-all:rank:%s, time: %s",my_rank,time()-T)
 
     return my_neighbour_count
 
 
-def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_container):
+def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_frames):
     """
     Notes:
     - Updates neighbour_count_dict in-place.
@@ -238,18 +250,18 @@ def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_container):
     (where k =n to 0 and  i=0 to n-1) frame , and decrementing n each time.
     Each time the_count_buffer[i] is incremented, if k and i are neighbours.
     """
-    the_container_frame_pointer = the_container.get_first_frame_pointer()
-    the_container_number_atoms  = the_container.get_number_atoms()
+    the_frame_pointer = the_frames.get_first_frame_pointer()
+    the_number_atoms  = the_frames.number_atoms
 
-    the_count_buffer = np.zeros(the_container.get_number_frames(), dtype=np.int32)
+    the_count_buffer = np.zeros(the_frames.number_frames, dtype=np.int32)
     
-    for iter_limit, the_frameID in reversed(list(enumerate(the_container.get_globalIDs_iter()))):
+    for iter_limit, the_frameID in reversed(list(enumerate(the_frames.globalIDs_iter))):
         neighbour_count = my_metric.count_number_neighbours( 
             cutoff                  = cutoff,
-            reference_frame_pointer = the_container.get_frame_pointer(the_frameID),
-            frame_array_pointer     = the_container_frame_pointer,
+            reference_frame_pointer = the_frames.get_frame_pointer(the_frameID),
+            frame_array_pointer     = the_frame_pointer,
             number_frames           = iter_limit, # Check only until the_frameID
-            number_atoms            = the_container_number_atoms,
+            number_atoms            = the_number_atoms,
             int_output_buffer       = the_count_buffer,
             )
 
@@ -258,7 +270,7 @@ def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_container):
         except KeyError:
             neighbour_count_dict[the_frameID]  = neighbour_count
 
-    for the_frameID, the_count in zip(the_container.get_globalIDs_iter(), the_count_buffer):
+    for the_frameID, the_count in zip(the_frames.globalIDs_iter, the_count_buffer):
         # Because of iter_limit, no frame is compared with itself, so add it here.
         try:
             neighbour_count_dict[the_frameID] += the_count + 1 
@@ -269,31 +281,31 @@ def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_container):
                 
 
 
-def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_container, other_container):
+def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_received_frames):
     """
     Notes:
     - Updates neighbour_count_dict in-place.
     """
 
-    other_container_frame_pointer = other_container.get_first_frame_pointer()
-    other_container_number_frames = other_container.get_number_frames()
-    other_container_number_atoms  = other_container.get_number_atoms()
+    received_frames_pointer = my_received_frames.get_first_frame_pointer()
+    received_frames_number_frames = my_received_frames.number_frames
+    received_frames_number_atoms  = my_received_frames.number_atoms
 
-    other_count_buffer = np.zeros(other_container.get_number_frames(), dtype=np.int32)
+    count_buffer = np.zeros(received_frames_number_frames, dtype=np.int32)
 
-    for my_frameID in my_container.get_globalIDs_iter():
+    for my_frameID in my_frames.globalIDs_iter:
         neighbour_count = my_metric.count_number_neighbours( 
             cutoff                  = cutoff,
-            reference_frame_pointer = my_container.get_frame_pointer(my_frameID),
-            frame_array_pointer     = other_container_frame_pointer,
-            number_frames           = other_container_number_frames,
-            number_atoms            = other_container_number_atoms,
-            int_output_buffer       = other_count_buffer,
+            reference_frame_pointer = my_frames.get_frame_pointer(my_frameID),
+            frame_array_pointer     = received_frames_pointer,
+            number_frames           = received_frames_number_frames,
+            number_atoms            = received_frames_number_atoms,
+            int_output_buffer       = count_buffer,
             )
 
         neighbour_count_dict[my_frameID] += neighbour_count
 
-    for other_frameID, other_count in zip(other_container.get_globalIDs_iter(), other_count_buffer):
+    for other_frameID, other_count in zip(my_received_frames.globalIDs_iter, count_buffer):
         try:
             neighbour_count_dict[other_frameID] += other_count
         except KeyError:
@@ -301,8 +313,8 @@ def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_container, o
 
 # --------------------------------------------------------------------------------------------------------
 
-def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_globalID_distribution,
-                     my_metric, my_container, checkpoint_filepath):
+def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
+                     metric, my_frames, checkpoint_filepath):
     
     '''
     Daura clustering.
@@ -318,8 +330,7 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
 
 
     # Extract container metadata.
-    my_container_globalIDs = my_container.get_globalIDs()
-    my_container_localIDs  = my_container.get_localIDs()
+    my_localIDs  = my_frames.global_to_local
 
 
 
@@ -341,7 +352,7 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
         where the lists represent the set of vertices belonging to the cluster with center C.
         i.e. a map: FrameID -> [FrameID]
     """
-    mask_removed_vertices = np.zeros(my_container.get_number_frames(), dtype=np.int32)
+    mask_removed_vertices = np.zeros(my_frames.number_frames, dtype=np.int32)
     mask_removed_vertices_ptr = mask_removed_vertices.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
     
     if checkpoint_filepath is None:
@@ -358,8 +369,8 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
 
         # Recreate mask.
         for v in removed_vertices:
-            if v in my_container_localIDs:
-                mask_removed_vertices[my_container_localIDs[v]] = 1
+            if v in my_localIDs:
+                mask_removed_vertices[my_localIDs[v]] = 1
 
     # Do Clustering!
     while len(neighbour_counts) != 0:
@@ -373,22 +384,21 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
             if (degree > center_degree) or ((degree == center_degree) and (frameID < center_id)):
                 center_degree = degree
                 center_id = frameID
-                print "fufa", degree, frameID
                     
         print0(rank=my_rank,msg="Center Frame %s. Members %s"%(center_id,center_degree))
-        center_host_node = find_node_of_frame(center_id, frame_globalID_distribution)
+        center_host_node = manager.find_node_of_frame(center_id)
         if center_host_node is None:
             raise KeyError("Next cluster center ID not found within any node.")
             
 
         # Broadcasting of center.
         if my_rank == center_host_node:
-            center_frame = my_container.get_frame(center_id)
+            center_frame = my_frames.get_frame(center_id)
         else:
-            shape = (my_container.get_number_atoms(), 3)
-            center_frame = np.empty(shape, dtype=container.NumpyFloat)
+            shape = (my_frames.number_atoms, 3)
+            center_frame = np.empty(shape, dtype=my_frames.frames.dtype)
 
-        comm.Bcast([center_frame, container.MPIFloat], root=center_host_node)
+        comm.Bcast([center_frame, my_frames.mpi_frametype ], root=center_host_node)
         
 
         
@@ -399,13 +409,13 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
 
         # Find cluster members.
         center_frame_pointer = center_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
-        rmsd_buffer = np.empty(my_container.get_number_frames(), dtype=container.NumpyFloat)
+        rmsd_buffer = np.empty(my_frames.number_frames, dtype=my_frames.frames.dtype)
 
-        my_metric.compute_distances( 
+        metric.compute_distances( 
             reference_frame_pointer = center_frame_pointer,
-            frame_array_pointer     = my_container.get_first_frame_pointer(),
-            number_frames           = my_container.get_number_frames(),
-            number_atoms            = my_container.get_number_atoms(),
+            frame_array_pointer     = my_frames.get_first_frame_pointer(),
+            number_frames           = my_frames.number_frames,
+            number_atoms            = my_frames.number_atoms,
             real_output_buffer      = rmsd_buffer, # compute_distances writes results to this buffer.
             mask_ptr                = mask_removed_vertices_ptr,
             mask_dummy_value        = -1.0,
@@ -414,7 +424,7 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
         fst = lambda x: x[0]
         existsAndWithinCutoff = lambda x: (x[0] not in removed_vertices) and (0.0 <= x[1] <= cutoff)
         my_members = map(fst, filter(existsAndWithinCutoff,
-                        zip(my_container.get_globalIDs_iter(), rmsd_buffer)))
+                        zip(my_frames.globalIDs_iter, rmsd_buffer)))
         # (note: using globalIDs here is necessary because we allow striding in the input frames)
 
         # Broadcasting of members.
@@ -437,27 +447,27 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
         removed_vertices.update(members)
 
         for v in members:
-            if v in my_container_localIDs:
-                mask_removed_vertices[my_container_localIDs[v]] = 1
+            if v in my_localIDs:
+                mask_removed_vertices[my_localIDs[v]] = 1
         
         clusters[center_id] = list(members)
 
 
         # Broadcast of the member frames of the new cluster.
-        shape = (my_container.get_number_atoms(), 3) # 3 because rvec has type c_real[3]
+        shape = (my_frames.number_atoms, 3) # 3 because rvec has type c_real[3]
 
         member_frames_byNode = [ [None] * len(xs) for xs in members_gathered ]
         for i, frames_sublist in enumerate(member_frames_byNode):
             if my_rank == i:
                 for j in xrange(len(frames_sublist)):
-                    frames_sublist[j] = my_container.get_frame(members_gathered[i][j])
+                    frames_sublist[j] = my_frames.get_frame(members_gathered[i][j])
             else:
                 for j in xrange(len(frames_sublist)):
-                    frames_sublist[j] = np.empty(shape, dtype=container.NumpyFloat)
+                    frames_sublist[j] = np.empty(shape, dtype=my_frames.frames.dtype)
 
         for i, frames_sublist in enumerate(member_frames_byNode):
             for j in xrange(len(frames_sublist)):
-                comm.Bcast([frames_sublist[j], container.MPIFloat], root=i)
+                comm.Bcast([frames_sublist[j], my_frames.mpi_frametype], root=i)
 
         member_frames = itertools.chain(*member_frames_byNode)
 
@@ -469,27 +479,27 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
 
         # For the remaining vertices:
         # count the number of adjacent vertices that were newly clustered 
-        my_container_frame_pointer = my_container.get_first_frame_pointer()
-        my_container_number_frames = my_container.get_number_frames()
-        my_container_number_atoms  = my_container.get_number_atoms()
+        my_frames_frame_pointer = my_frames.get_first_frame_pointer()
+        my_frames_number_frames = my_frames.number_frames
+        my_frames_number_atoms  = my_frames.number_atoms
 
-        count_buffer = np.zeros(my_container.get_number_frames(), dtype=np.int32)
+        count_buffer = np.zeros(my_frames_number_frames, dtype=np.int32)
         
         for w_frame in member_frames:
             w_frame_pointer = w_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
 
-            neighbour_count = my_metric.count_number_neighbours( 
+            neighbour_count = metric.count_number_neighbours( 
                 cutoff                  = cutoff,
                 reference_frame_pointer = w_frame_pointer,
-                frame_array_pointer     = my_container_frame_pointer,
-                number_frames           = my_container_number_frames,
-                number_atoms            = my_container_number_atoms,
+                frame_array_pointer     = my_frames_frame_pointer,
+                number_frames           = my_frames_number_frames,
+                number_atoms            = my_frames_number_atoms,
                 int_output_buffer       = count_buffer,
                 mask_ptr                = mask_removed_vertices_ptr,
                 )
 
         my_neighbours_decr = {}
-        for i, frameID in enumerate(my_container.get_globalIDs_iter()):
+        for i, frameID in enumerate(my_frames.globalIDs_iter):
             my_neighbours_decr[frameID] = count_buffer[i]
 
 
@@ -506,7 +516,6 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
 
 
         # Update the degrees of the remaining vertices.
-        sorted_keys = sorted(neighbours_decr.keys()) # for determinism.
         for frameID in neighbours_decr.keys():
             try:
                 neighbour_counts[frameID] -= neighbours_decr[frameID]
@@ -528,8 +537,8 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, frame_gl
 # ================================================================
 # Checkpoint file handling.
 
-def write_checkpoint(filepath, heap, clusters, removed_vertices):
-    checkpoint_objects = (heap, clusters, removed_vertices)
+def write_checkpoint(filepath, neighbour_counts, clusters, removed_vertices):
+    checkpoint_objects = (neighbour_counts, clusters, removed_vertices)
 
     with open(filepath, 'wb') as f:
         cPickle.dump(checkpoint_objects, f, protocol=2)
@@ -571,205 +580,155 @@ def cluster_dict_to_text(clusters, centers_filepath, clusters_filepath):
 
     return None
 
-# ================================================================
-# Clustering Sub-Functions.
-# For only the sake of not having a massive function.
-# These functions just split up the old large function without too much thought.
 
-def allToAll_neighbourCount_old(cutoff, comm, mpi_size, my_rank, my_metric, my_container):
-
-    my_neighbour_count = dict(( (x, 0) for x in my_container.get_globalIDs_iter() ))
-    
-    for k in xrange(mpi_size): 
-        print0(rank=my_rank,msg="All-to-all: Round {0}/{1}".format(k+1, mpi_size))
-
-        if k == 0:
-            other_container = my_container
-        else:
-            mpi_send_lambda = my_container.mpi_send_lambda(comm)
-            mpi_recv_lambda = Container.mpi_recv_lambda(comm)
-
-            ring_schedule_k = parallel.make_ring_schedule(mpi_size, k)
-            other_container = parallel.run_schedule(ring_schedule_k, my_rank,
-                                                    mpi_send_lambda, mpi_recv_lambda)
-
-        other_container_frame_pointer = other_container.get_first_frame_pointer()
-        other_container_number_frames = other_container.get_number_frames()
-        other_container_number_atoms  = other_container.get_number_atoms()
-
-        count_buffer = np.zeros(other_container.get_number_frames(), dtype=np.int32)
-
-        for frame_count, object_frameID in enumerate(my_container.get_globalIDs_iter()):
-            if frame_count & 255 == 0: # Output progress.
-                print0(rank=my_rank,msg="\t[Neighbours | Node 0] Frame: {0}/{1}".format(
-                            frame_count, my_container.get_number_frames()))
-
-            neighbour_count = my_metric.count_number_neighbours( 
-                cutoff                  = cutoff,
-                reference_frame_pointer = my_container.get_frame_pointer(object_frameID),
-                frame_array_pointer     = other_container_frame_pointer,
-                number_frames           = other_container_number_frames,
-                number_atoms            = other_container_number_atoms,
-                int_output_buffer       = count_buffer,
-                )
-
-            my_neighbour_count[object_frameID] += neighbour_count
-
-    return my_neighbour_count
-############################################################################################
-
-def refine(project_filepath, cutoff,centerfile):
-    # Initialize MPI.
-    comm = MPI.COMM_WORLD
-    mpi_size = comm.Get_size()
-    my_rank = comm.Get_rank()
-    comm.Barrier()
-
-    # Print only at node 0.
-#     def my_print(x):
-#         print x
-#     print0 = lambda x: my_print(x) if my_rank == 0 else None
-
-    # Say hello.
-    print0(rank=my_rank,msg=" Initialized MPI.")
-    logger.debug("Hello, from node %s",my_rank)
-
-    # Load project file.
-    print0(rank=my_rank,msg=" Reading project yaml file.")
-    my_project = Project(existing_project_file = project_filepath)
-
-
-    # Instantiate Metric class.
-    if my_rank == 0:
-        my_metric = Metric(tpr_filepath = my_project.get_tpr_filepath(),
-                                  ndx_filepath = my_project.get_ndx_filepath(),
-                                  number_dimensions = my_project.get_number_dimensions(), )
-        my_metric.destroy_pointers()
-    else:
-        my_metric = None
-
-    my_metric = comm.bcast(my_metric, root=0)
-    print0(rank=my_rank,msg="metric object broadcasted.")
-
-    my_metric.create_pointers()
-
-
-    # ----------------------------------------------------------------
-    # Divide trajectories between nodes.
-    # Get trajectory data.
-
-    # Read.
-    trajectory_lengths = my_project.get_trajectory_lengths()
-    trajectory_filepaths = my_project.get_trajectory_filepaths()
-    
-    # Offests and Ranges.
-    cumulative_sum = lambda xs: functional.scanl(lambda x,y: x+y, xs)
-
-    trajectory_ID_offsets = [0] + cumulative_sum(trajectory_lengths)[:-1]
-    trajectory_ID_ranges = zip(trajectory_ID_offsets, cumulative_sum(trajectory_lengths))
-
-    # Divide work.
-    costs = trajectory_lengths
-    items = zip(trajectory_filepaths, trajectory_lengths,
-                trajectory_ID_offsets, trajectory_ID_ranges)
-
-    print0(rank=my_rank,msg=" Dividing trajectories between nodes.")
-    cost_sums, partitions = parallel.divide_work(mpi_size, costs, items)
-    # partitions :: [[(a,b,..)]]
-
-    transpose = lambda xs: zip(*xs)
-    transposed_partitions = map(transpose, partitions)
-    # transposed_partitions :: [([a0, a1, ...], [b0, b1, ...], ..)] # (conceptually)
-
-    (parts_trajectory_filepaths, parts_trajectory_lengths, \
-        parts_trajectory_ID_offsets, parts_trajectory_ID_ranges) = \
-        map(list, zip(*transposed_partitions))
-
-    # Take work share.
-    my_partition = transposed_partitions[my_rank]
-    
-    (my_trajectory_filepaths, my_trajectory_lengths, \
-        my_trajectory_ID_offsets, my_trajectory_ID_ranges) = \
-        map(list, my_partition)
-
-    # Record the range of frames assigned to each node.
-    # (Lower bound is inclusive, upper bound is exclusive.)
-    # Only valid if contiguous_divide_work groups the trajectories in contiguous ranges.
-    # Note that when striding != 1 this is not a contiguous range of frames that a node stores.
-    frame_globalID_distribution = list(parts_trajectory_ID_ranges)
-
-    #print0(my_rank,"\tDistribution: {0}".format(frame_globalID_distribution))
-    print0(rank=my_rank,msg="Reading trajectories at {0}.".format(my_rank))
-    my_container = Container.from_files(
-            stride = 1,
-            trajectory_type = my_project.get_trajectory_type(),
-            trajectory_globalID_offsets = my_trajectory_ID_offsets,
-            trajectory_filepath_list = my_trajectory_filepaths,
-            trajectory_length_list = my_trajectory_lengths, )
-
-        
-    # ----------------------------------------------------------------
-    # Preprocess trajectories (modifying them in-place).
-    # Metric preprocessing.
-#    print0(my_rank,"[Cluster] Preprocessing trajectories (for Metric).")
-#    my_metric.preprocess(   frame_array_pointer = my_container.get_first_frame_pointer(),
-#                            number_frames = my_container.get_number_frames(),
-#                            number_atoms = my_container.get_number_atoms(), )
-
-    clustercenters = txtreader.readcols(centerfile)[:,1]
-
-    clusters = {} # :: FrameID (cluster center) -> [FrameID] (the cluster -- its list of frames)
-    my_unclustered = set([i for i in my_container.get_globalIDs_iter()])
-    removed_vertices = set()
-
-    for center_id in clustercenters:
-        center_host_node = find_node_of_frame(center_id, frame_globalID_distribution)
-        if center_host_node is None:
-            raise KeyError("Next cluster center ID not found within any node.")
-            
-
-        # Broadcasting of center.
-        if my_rank == center_host_node:
-            center_frame = my_container.get_frame(center_id)
-        else:
-            shape = (my_container.get_number_atoms(), 3)
-            center_frame = np.empty(shape, dtype=container.NumpyFloat)
-
-        comm.Bcast([center_frame, container.MPIFloat], root=center_host_node)
-        center_frame_pointer = center_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
-        rmsd_buffer = np.empty(my_container.get_number_frames(), dtype=container.NumpyFloat)
-
-        my_metric.compute_distances( 
-            reference_frame_pointer = center_frame_pointer,
-            frame_array_pointer = my_container.get_first_frame_pointer(),
-            number_frames = my_container.get_number_frames(),
-            number_atoms = my_container.get_number_atoms(),
-            real_output_buffer = rmsd_buffer, # writes results to this buffer.
-            mask_ptr = None,
-            mask_dummy_value = -1.0,
-            )
-        
-        fst = lambda x: x[0]
-        existsAndWithinCutoff = lambda x: (x[0] not in removed_vertices) and (0.0 <= x[1] <= cutoff)
-        my_members = map(fst, filter(existsAndWithinCutoff,
-                        zip(my_container.get_globalIDs_iter(), rmsd_buffer))) # for striding.
-
-        # Broadcasting of members.
-        members_gathered = comm.allgather(my_members)
-        members = list(itertools.chain(*members_gathered))
-        removed_vertices.update(members)
-        clusters[center_id] = list(members)
-        my_unclustered = my_unclustered.difference(set(members))
-    unclustered_gathered = comm.allgather(my_unclustered)
-    unclustered = list(itertools.chain(*unclustered_gathered))
-    print unclustered
-    for i in unclustered:
-        clusters[i]=[i]
-        
-    return clusters 
-     
-    # ================================================================
- ### 1. load all trajectories and clustercenters
- ### 2. Assign clustermembers to clustercenters
- ### 3. Take all the unclustered ones, and assign as clid -1 to them  
-    
+# def refine(project_filepath, cutoff,centerfile):
+#     # Initialize MPI.
+#     comm = MPI.COMM_WORLD
+#     mpi_size = comm.Get_size()
+#     my_rank = comm.Get_rank()
+#     comm.Barrier()
+# 
+#     # Print only at node 0.
+# #     def my_print(x):
+# #         print x
+# #     print0 = lambda x: my_print(x) if my_rank == 0 else None
+# 
+#     # Say hello.
+#     print0(rank=my_rank,msg=" Initialized MPI.")
+#     logger.debug("Hello, from node %s",my_rank)
+# 
+#     # Load project file.
+#     print0(rank=my_rank,msg=" Reading project yaml file.")
+#     my_project = Project(existing_project_file = project_filepath)
+# 
+# 
+#     # Instantiate Metric class.
+#     if my_rank == 0:
+#         my_metric = Metric(tpr_filepath = my_project.get_tpr_filepath(),
+#                                   ndx_filepath = my_project.get_ndx_filepath(),
+#                                   number_dimensions = my_project.get_number_dimensions(), )
+#         my_metric.destroy_pointers()
+#     else:
+#         my_metric = None
+# 
+#     my_metric = comm.bcast(my_metric, root=0)
+#     print0(rank=my_rank,msg="metric object broadcasted.")
+# 
+#     my_metric.create_pointers()
+# 
+# 
+#     # ----------------------------------------------------------------
+#     # Divide trajectories between nodes.
+#     # Get trajectory data.
+# 
+#     # Read.
+#     trajectory_lengths = my_project.get_trajectory_lengths()
+#     trajectory_filepaths = my_project.get_trajectory_filepaths()
+#     
+#     # Offests and Ranges.
+#     cumulative_sum = lambda xs: functional.scanl(lambda x,y: x+y, xs)
+# 
+#     trajectory_ID_offsets = [0] + cumulative_sum(trajectory_lengths)[:-1]
+#     trajectory_ID_ranges = zip(trajectory_ID_offsets, cumulative_sum(trajectory_lengths))
+# 
+#     # Divide work.
+#     costs = trajectory_lengths
+#     items = zip(trajectory_filepaths, trajectory_lengths,
+#                 trajectory_ID_offsets, trajectory_ID_ranges)
+# 
+#     print0(rank=my_rank,msg=" Dividing trajectories between nodes.")
+#     cost_sums, partitions = parallel.divide_work(mpi_size, costs, items)
+#     # partitions :: [[(a,b,..)]]
+# 
+#     transpose = lambda xs: zip(*xs)
+#     transposed_partitions = map(transpose, partitions)
+#     # transposed_partitions :: [([a0, a1, ...], [b0, b1, ...], ..)] # (conceptually)
+# 
+#     (parts_trajectory_filepaths, parts_trajectory_lengths, \
+#         parts_trajectory_ID_offsets, parts_trajectory_ID_ranges) = \
+#         map(list, zip(*transposed_partitions))
+# 
+#     # Take work share.
+#     my_partition = transposed_partitions[my_rank]
+#     
+#     (my_trajectory_filepaths, my_trajectory_lengths, \
+#         my_trajectory_ID_offsets, my_trajectory_ID_ranges) = \
+#         map(list, my_partition)
+# 
+#     # Record the range of frames assigned to each node.
+#     # (Lower bound is inclusive, upper bound is exclusive.)
+#     # Only valid if contiguous_divide_work groups the trajectories in contiguous ranges.
+#     # Note that when striding != 1 this is not a contiguous range of frames that a node stores.
+#     frame_globalID_distribution = list(parts_trajectory_ID_ranges)
+# 
+#     #print0(my_rank,"\tDistribution: {0}".format(frame_globalID_distribution))
+#     print0(rank=my_rank,msg="Reading trajectories at {0}.".format(my_rank))
+#     my_container = Container.from_files(
+#             stride = 1,
+#             trajectory_type = my_project.get_trajectory_type(),
+#             trajectory_globalID_offsets = my_trajectory_ID_offsets,
+#             trajectory_filepath_list = my_trajectory_filepaths,
+#             trajectory_length_list = my_trajectory_lengths, )
+# 
+#         
+#     # ----------------------------------------------------------------
+#     # Preprocess trajectories (modifying them in-place).
+#     # Metric preprocessing.
+# #    print0(my_rank,"[Cluster] Preprocessing trajectories (for Metric).")
+# #    my_metric.preprocess(   frame_array_pointer = my_container.get_first_frame_pointer(),
+# #                            number_frames = my_container.number_frames(),
+# #                            number_atoms = my_container.number_atoms(), )
+# 
+#     clustercenters = txtreader.readcols(centerfile)[:,1]
+# 
+#     clusters = {} # :: FrameID (cluster center) -> [FrameID] (the cluster -- its list of frames)
+#     my_unclustered = set([i for i in my_container.globalIDs_iter])
+#     removed_vertices = set()
+# 
+#     for center_id in clustercenters:
+#         center_host_node = find_node_of_frame(center_id, frame_globalID_distribution)
+#         if center_host_node is None:
+#             raise KeyError("Next cluster center ID not found within any node.")
+#             
+# 
+#         # Broadcasting of center.
+#         if my_rank == center_host_node:
+#             center_frame = my_container.get_frame(center_id)
+#         else:
+#             shape = (my_container.number_atoms(), 3)
+#             center_frame = np.empty(shape, dtype=container.NumpyFloat)
+# 
+#         comm.Bcast([center_frame, container.MPIFloat], root=center_host_node)
+#         center_frame_pointer = center_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
+#         rmsd_buffer = np.empty(my_container.number_frames(), dtype=container.NumpyFloat)
+# 
+#         my_metric.compute_distances( 
+#             reference_frame_pointer = center_frame_pointer,
+#             frame_array_pointer = my_container.get_first_frame_pointer(),
+#             number_frames = my_container.number_frames(),
+#             number_atoms = my_container.number_atoms(),
+#             real_output_buffer = rmsd_buffer, # writes results to this buffer.
+#             mask_ptr = None,
+#             mask_dummy_value = -1.0,
+#             )
+#         
+#         fst = lambda x: x[0]
+#         existsAndWithinCutoff = lambda x: (x[0] not in removed_vertices) and (0.0 <= x[1] <= cutoff)
+#         my_members = map(fst, filter(existsAndWithinCutoff,
+#                         zip(my_container.globalIDs_iter, rmsd_buffer))) # for striding.
+# 
+#         # Broadcasting of members.
+#         members_gathered = comm.allgather(my_members)
+#         members = list(itertools.chain(*members_gathered))
+#         removed_vertices.update(members)
+#         clusters[center_id] = list(members)
+#         my_unclustered = my_unclustered.difference(set(members))
+#     unclustered_gathered = comm.allgather(my_unclustered)
+#     unclustered = list(itertools.chain(*unclustered_gathered))
+#     print unclustered
+#     for i in unclustered:
+#         clusters[i]=[i]
+#         
+#     return clusters 
+#      
+#     

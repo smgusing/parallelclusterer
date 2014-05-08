@@ -14,8 +14,6 @@ import logging
 import numpy as np
 from mpi4py import MPI 
 import gp_grompy
-import parallelclusterer
-
 # Package classes
 import trajectory_reader
 
@@ -26,9 +24,9 @@ logger = logging.getLogger(__name__)
 NumpyFloat = np.float32
 CtypesFloat = ctypes.c_float
 CtypesFloatPtr = ctypes.POINTER(ctypes.c_float)
-MPIFloat = MPI.FLOAT
-MPIInt32 = MPI.INT32_T
-MPIByte = MPI.BYTE
+MPIFloat32 = MPI.FLOAT
+MPIInt32 = MPI.INT
+MPIByte = MPI.CHAR
 MAXTAGS = 10
 
 class Framecollection():
@@ -64,7 +62,7 @@ class Framecollection():
                     localID: array_like (int32)
                         local number of the frame
                         
-                    frames: array_like
+                    frames: array_like (float32)
                             concatenated trajectory frames
                              
                     traj_filepath: list  
@@ -73,7 +71,7 @@ class Framecollection():
                     traj_lengths: array_like (int32)
                             number of frames in each trajectory that are part of this collection, in sequence
                             
-                    mask: boolean_array
+                    mask: boolean_array ( 8 bit?)
                         false by default
                         
         """
@@ -84,7 +82,7 @@ class Framecollection():
         self.traj_filepaths = traj_filepaths
         self.traj_lenghts = traj_lenghts
         self.tags=[i for i in range(MAXTAGS)]
-        
+        self.mpi_frametype = MPIFloat32
         try:
             if globalIDs.size == localIDs.size:
                 self.global_to_local = self._gen_dict()
@@ -92,7 +90,7 @@ class Framecollection():
             else:
                 raise SystemExit("number of globalIDs and localIDs are different ..exiting")
             
-        except ATrributeError:
+        except AttributeError:
                 self.global_to_local = None
                          
                   
@@ -100,7 +98,7 @@ class Framecollection():
         ''' return dict with globalIDs as keys and localIDs as values
         '''
         
-        return dict(zip(self.globaIDs,self.localIDs))
+        return dict(zip(self.globalIDs,self.localIDs))
         
 
     @classmethod
@@ -142,16 +140,17 @@ class Framecollection():
              (traj_filepath, traj_length) in izip(trajectory_filepath_list, trajectory_length_list)  ]
          
         new.frames = np.concatenate(trajectory_coordinate_arrays) # np.concatenate vs np.vstack?
-
         if (new.globalIDs.shape[0] != new.number_frames):
             logger.error(" Number of Frame Expected [%d] and number of frame read [%d] do not match",
                                                                         new.globalIDs.shape[0],new.number_frames)
             raise SystemExit("Exiting..")
         
         new.traj_filepaths = trajectory_filepath_list
-        new.traj_lengths   = np.array(traj_length_list,dtype=np.int32)
+        new.traj_lengths   = np.array(trajectory_length_list,dtype=np.int32)
         new.global_to_local = new._gen_dict()
-
+        
+        logger.debug("traj_lengths %s: globaIDs shape %s frames shape %s",
+                     new.traj_lengths.shape,new.globalIDs.shape,new.frames.shape)
         return new
 
 
@@ -171,7 +170,7 @@ class Framecollection():
         new.frames = np.copy(self.frames)
         new.mask   = np.copy(self.mask)
         new.traj_filepaths = list(self.traj_filepaths)
-        new.traj_lengths =np.copy(self.traj_lenghts)
+        new.traj_lengths =np.copy(self.traj_lengths)
         new.global_to_local = new._gen_dict()
         
         return new
@@ -190,19 +189,27 @@ class Framecollection():
                 comm: object of Comm class from mpi4py
                 dest_rank: rank of the node to send to
         """
+        tag=0
+        comm.send([self.frames.shape,self.globalIDs.shape,
+                   self.traj_lengths.shape],dest=dest_rank,tag=tag)
+        tag += 1
+        comm.Send([self.frames, MPIFloat32], dest=dest_rank,tag=tag)
+        tag += 1
+        comm.Send([self.globalIDs, MPIInt32], dest=dest_rank,tag=tag)
+        tag += 1
+        comm.Send([self.localIDs, MPIInt32], dest=dest_rank,tag=tag)
+        tag += 1
+        comm.Send([self.mask, MPIByte], dest=dest_rank,tag=tag)
+        tag += 1
+        comm.Send([self.traj_lengths,MPIInt32],dest=dest_rank,tag=tag)
+        tag += 1
+        comm.send(self.traj_filepaths,dest=dest_rank,tag=tag)
+        
+        logger.debug("sent to destination %s tag %s",dest_rank,tag)
 
-        #metadata_part, array_part = self._mpi_split()
-        comm.Send([self.frames, MPIFloat], dest=dest_rank,tag=self.tag[0])
-        comm.Send([self.globalIDs, MPIInt32], dest=dest_rank,tag=self.tag[1])
-        comm.Send([self.localIDs, MPIInt32], dest=dest_rank,tag=self.tag[2])
-        comm.Send([self.mask, MPIByte], dest=dest_rank,tag=self.tag[3])
-        comm.Send([self.traj_lengths],dest=dest_rank,tag=self.tag[4])
-        comm.send(self.traj_filepaths,dest=dest_rank,tag=self.tag[5])
-
-
-#     def mpi_send_lambda(self, comm):
-#         """See parallel.py."""
-#         return lambda dest_rank: self.mpi_send(comm, dest_rank)
+    def for_sending(self, comm):
+        """"""
+        return lambda dest_rank: self.send_to_remote(comm, dest_rank)
 
 
     def receive_from_remote(self, comm, send_rank):
@@ -211,22 +218,40 @@ class Framecollection():
                 comm: object of Comm class from mpi4py
                 send_rank: rank of the node to recieve from
         """
-
-        comm.Recv([self.frames, MPIFloat], source=send_rank,tag=self.tag[0])
-        comm.Recv([self.globalIDs, MPIInt32], source=send_rank,tag=self.tag[1])
-        comm.Recv([self.localIDs, MPIInt32], source=send_rank,tag=self.tag[2])
-        comm.Recv([self.mask, MPIByte], source=send_rank,tag=self.tag[3])
-        comm.Recv([self.traj_lengths, MPIInt32], source=send_rank,tag=self.tag[4])
-        comm.recv(self.traj_filepaths, source=send_rank,tag=self.tag[5])
+        tag = 0
+        # need to get frame shape before we can receive
+        frame_shape,ID_shape,trajlen_shape = comm.recv(source=send_rank,tag=tag)
+        
+        self.frames = np.empty(frame_shape,dtype=NumpyFloat)
+        self.globalIDs = np.empty(ID_shape,dtype=np.int32)
+        self.localIDs = np.empty(ID_shape,dtype=np.int32)
+        self.mask = np.empty(ID_shape,dtype=np.bool)
+        self.traj_lengths = np.empty(trajlen_shape,dtype=np.int32)
+        
+        tag += 1
+        comm.Recv([self.frames, MPIFloat32], source=send_rank,tag=tag)
+        tag += 1
+        comm.Recv([self.globalIDs, MPIInt32], source=send_rank,tag=tag)
+        tag += 1
+        comm.Recv([self.localIDs, MPIInt32], source=send_rank,tag=tag)
+        tag += 1
+        comm.Recv([self.mask, MPIByte], source=send_rank,tag=tag)
+        tag += 1
+        comm.Recv([self.traj_lengths, MPIInt32], source=send_rank,tag=tag)
+        tag += 1
+        self.traj_filepaths = comm.recv(source=send_rank,tag=tag)
+        
+        logger.debug("Received from source %s tag %s",send_rank,tag)
+        
+        if self.frames.flags["C_CONTIGUOUS"] == False:
+            logger.warning("non contiguous array.. remaking it")
+            self.frames = np.ascontiguousarray(self.frames, dtype=NumpyFloat)
         
         self.global_to_local = self._gen_dict()
-
-#     @staticmethod 
-#     def mpi_recv_lambda(comm):
-#         """See parallel.py."""
-#         return lambda send_rank: Container.mpi_recv(comm, send_rank)
-
-
+    
+    def for_receiving(self,comm):
+        return lambda send_rank: self.receive_from_remote(comm, send_rank)
+        
     # ================================================================
     # Array indexing methods.
 

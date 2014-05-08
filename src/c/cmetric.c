@@ -71,7 +71,7 @@ inline void rvec_inplace_add(rvec v, rvec w) {
 }
 
 
-/* Removes the center-of-mass from a single frame. 
+/* Removes the center-of-mass from a single frame. */
 void removeCenterOfMass(
     rvec *object_frame, int number_dimensions, const real *masses, real total_mass,
     int domain_size, const atom_id *domain_indices, // Find the center of these atoms -> shift_vector.
@@ -123,10 +123,10 @@ void removeCenterOfMass(
         }
     }
 }
-*/
 
 
-/* Apply removeCenterOfMass to an array of frames with parallelization. 
+
+/* Apply removeCenterOfMass to an array of frames with parallelization. */
 void parallelFor_removeCenterOfMass( // *** Changed Name
     rvec *frame_array, int frame_array_size, int number_atoms, int number_dimensions,
     int fitting_size, int *fitting_indices, real *fitting_weights)
@@ -147,10 +147,10 @@ void parallelFor_removeCenterOfMass( // *** Changed Name
                            fitting_indices, number_atoms, NULL); // shift_indices == NULL: Shift all atoms.
     }
 }
-*/
 
 
-/* Computes the minimum rmsd between two frames allowing for rotation. 
+
+/* Computes the minimum rmsd between two frames allowing for rotation. */
 // Assumes that the center of mass of the frames is the origin.
 real computeRmsd(rvec *frame0, rvec *frame1, int number_atoms, int number_dimensions,
               real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size)
@@ -192,80 +192,6 @@ real computeRmsd(rvec *frame0, rvec *frame1, int number_atoms, int number_dimens
 
     // Normalize using mass.
     return sqrt(rmsd_acc / total_mass);
-}
-*/
-
-// pablo
-  long int k,kk;
-  real rotmat[3][3],ang,rmsdmin;
-  rvec *x2;
-//
-
-
-/* Computes the minimum rmsd between two frames allowing for rotation. */
-real computeRmsd(rvec *frame0, rvec *frame1, int number_atoms, int number_dimensions,
-              real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size)
-{
-    matrix rotation_matrix;
-    
-    int i, j, k, n, m;
-    real dx, rmsd_acc = 0.0, rmsdz = 0.0, rmsdxy = 0.0, rmsdxymin,ang,val;
-    rvec rotated;
-    
-    for (i = 0; i < rms_size; i++) {
-        // Get index.
-        if (rms_indices) {
-            j = rms_indices[i];
-        } else {
-            j = i;
-        }
-        n=number_dimensions-1;
-        dx=frame0[j][n]-frame1[j][n];
-        rmsdz+=dx*dx;
-        for (n = 0; n < number_dimensions-1; n++) {
-            dx = frame0[j][n] - frame1[j][n];
-            rmsdxy += dx * dx;
-        }   
-
-    }
-    rmsdxymin=rmsdxy;
-
-    for (k = 1; k < 7; k++ ) {
-       ang=k*0.897597901026; //360.0*pi/(180.0*7.0)
-       val=cos(ang);
-       rotation_matrix[0][0]=val;
-       rotation_matrix[1][1]=val;
-       val=sin(ang);
-       rotation_matrix[0][1]=val;
-       rotation_matrix[1][0]=-val;
-       rmsdxy=0.0;
-       for (i = 0; i < rms_size; i++) {
-           // Get index.
-           if (rms_indices) {
-               j = rms_indices[i];
-           } else {
-               j = i;
-           }
-
-           for (n = 0; n < number_dimensions-1; n++) {
-               rotated[n]=0.0;
-               for (m = 0; m < number_dimensions-1; m++) {
-                   rotated[n] += rotation_matrix[n][m] * frame1[j][m];
-               }
-           }
-
-           // Find rmsd between frame 0 and rotated frame 1.
-           for (n = 0; n < number_dimensions-1; n++) {
-               dx = frame0[j][n] - rotated[n];
-               rmsdxy += dx * dx;
-           }
-
-       }
-       if (rmsdxy<rmsdxymin) rmsdxymin=rmsdxy;
-    }
-
-    // Normalize using mass.
-    return sqrt( (rmsdxymin + rmsdz) / rms_size);
 }
 
 /* Apply computeRmsd to an array of frames with parallelization. */
@@ -324,7 +250,7 @@ int oneToMany_countWithinRmsd(
 
 void distance_onetomany(
     rvec *reference_frame, rvec *frame_array, int frame_array_size,
-    int number_atoms, int number_dimensions, real *fitting_weights,
+    int number_atoms, int number_dimensions,real *fitting_weights,
     int *rms_indices, real *rms_weights, int rms_size, real *rmsd)
     // line 0: frames, frame metadata
     // line 1: fitting parameters, rmsd parameters. rmsd write buffer.
@@ -336,8 +262,10 @@ void distance_onetomany(
     #pragma omp parallel for default(shared) private(i,object_frame)
     for (i = 0; i < frame_array_size; i++) {
         object_frame = frame_array + (i * number_atoms);
-        rmsd[i] = computeRmsd(reference_frame, object_frame, number_atoms,
-                            number_dimensions, fitting_weights, rms_indices, rms_weights, rms_size);
+        do_fit_ndim(number_dimensions, number_atoms, fitting_weights,
+        		reference_frame, object_frame); // GROMACS
+        rmsd[i] = rmsdev_ind(rms_size, rms_indices, rms_weights,
+        		  reference_frame, object_frame ); // GROMACS
     }
 } // fit_onetomany()
 
