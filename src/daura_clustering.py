@@ -390,7 +390,7 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
         if center_host_node is None:
             raise KeyError("Next cluster center ID not found within any node.")
             
-
+            
         # Broadcasting of center.
         if my_rank == center_host_node:
             center_frame = my_frames.get_frame(center_id)
@@ -528,7 +528,18 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
             write_checkpoint(".daura_last.checkpoint",
                         neighbour_counts, clusters, removed_vertices)
 
-
+        # if largest clustersize is one, then no need to cluster further
+        if center_degree == 1:
+            for frameID, degree in neighbour_counts.items():
+                clusters[frameID] = [frameID]
+                print0(rank=my_rank,msg="frame %s degree %s"%(frameID, degree))
+                
+                if degree > 1:
+                    logger.error("node %s: frame %s degree %s is greater than expected",my_rank,frameID, degree)
+                    raise SystemExit("Exiting on this")
+                else:
+                    del neighbour_counts[frameID]
+        
         
         
     return clusters
