@@ -27,10 +27,6 @@ import logging
 from project import Project
 from framecollection import Framecollection
 from loadmanager import Loadmanager 
-from rms_metric import Metric
-
-
-
 logger = logging.getLogger(__name__)
 
 # ================================================================
@@ -54,7 +50,8 @@ def print0(msg='',rank=0,msgtype="INFO"):
 # ================================================================
 # Clustering Main Function.
 
-def cluster(project_filepath, cutoff, checkpoint_filepath=None):
+def cluster(Metric, project_filepath, cutoff, checkpoint_filepath=None,
+            flag_nopreprocess = False):
     """
     project_filepath :: String   -- The path to the YAML project file.
     cutoff           :: Floating -- The cutoff distance passed to the Metric class.
@@ -80,18 +77,21 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
     logger.info("Reading project file at node %s",my_rank)
     project = Project(existing_project_file = project_filepath)
     
+    logger.debug("Initializing manager at node %s",my_rank)
     manager = Loadmanager(project.get_trajectory_lengths(),
                           project.get_trajectory_filepaths(),
                           mpi_size,my_rank)
     # metric has to be instantiated by only one mpi process as it needs user input
     # ie index groups
-    if my_rank == 0: 
+    if my_rank == 0:
+         
         metric = Metric(tpr_filepath = project.get_tpr_filepath(),
                        stx_filepath = project.get_gro_filepath(),
                        ndx_filepath = project.get_ndx_filepath(),
                        number_dimensions = project.get_number_dimensions() )
         # since we have to broadcast it we need to destroy all pointers to arrays
         metric.destroy_pointers()
+        logger.debug("Metric initialized at node 0")
     else:
         metric = None
     metric =  comm.bcast(metric, root = 0)
@@ -120,13 +120,17 @@ def cluster(project_filepath, cutoff, checkpoint_filepath=None):
             trajectory_length_list = my_trajectory_lengths, )
 
         
-    # ----------------------------------------------------------------
-    # Preprocess trajectories (modifying them in-place).
-    # Metric preprocessing.
-    logger.debug(" Preprocessing trajectories at rank %s",my_rank)
-    metric.preprocess( frame_array_pointer = my_frames.get_first_frame_pointer(),
-                       number_frames = my_frames.number_frames,
-                       number_atoms = my_frames.number_atoms)
+    if flag_nopreprocess == False:
+        # ----------------------------------------------------------------
+        # Preprocess trajectories (modifying them in-place).
+        # Metric preprocessing.
+        logger.debug(" Preprocessing trajectories at rank %s",my_rank)
+        metric.preprocess( frame_array_pointer = my_frames.get_first_frame_pointer(),
+                           number_frames = my_frames.number_frames,
+                           number_atoms = my_frames.number_atoms)
+    else:
+        
+        print0(rank=my_rank,msg=" Will not preprocess trajectories")
 
 
     # ================================================================

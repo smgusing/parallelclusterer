@@ -1,9 +1,12 @@
 #! /usr/bin/env python
 import argparse
 import sys,os
-import parallelclusterer
-import parallelclusterer.daura_clustering as daura
 import logging
+
+import parallelclusterer as pcl
+import parallelclusterer.daura_clustering as daura
+from parallelclusterer.gmx_metric_rmsd import Gmx_metric_rmsd
+from parallelclusterer.gmx_metric_custom1 import Gmx_metric_custom1
 
 logger = logging.getLogger("parallelclusterer")
 
@@ -23,8 +26,14 @@ parser.add_argument("-clusterfile", dest='clusterfile', default='clusters.txt',
 parser.add_argument("-centerfile", dest='centerfile', default='centers.txt',
                     help='Project file')
 
+parser.add_argument("-metric", dest='metric', default='gmx_rmsd',
+                    help='metric to apply. options are "gmx_rmsd" or "custom_1"')
+
 parser.add_argument("--usecheckpoint", action="store_true",dest='checkpoint', default=False,
                     help='Start from the checkpointfile ".daura_last.checkpoint"')
+
+parser.add_argument("--nopreprocessing", action="store_true",dest='no_preprocess', default=False,
+                    help='if true, the trajectories will not be preprocessed for COM removal')
 
 parser.add_argument("-l", dest='loglevel', help='level of logging (info,warn,debug)',
         default="debug")
@@ -49,8 +58,25 @@ def main(args):
     else:
         checkpointfile = None
         logger.info("Will not use any checkpoint")
+    
+    if args.metric == 'gmx_rmsd':
+        Metric = Gmx_metric_rmsd
+        logger.debug("Will use standard RMSD fitting with LSF")
+    elif args.metric == 'custom_1':
+        Metric = Gmx_metric_custom1
+        logger.debug("Will use custom LSF and RMSD")
+    else:
+        logger.error("%s not implimented",args.metric)
+        raise SystemExit("Quitting on this")
         
-    clusters = daura.cluster(args.projectfile, args.cutoff,checkpointfile)
+        
+        
+    clusters = daura.cluster(Metric=Metric,
+                             project_filepath=args.projectfile, 
+                             cutoff = args.cutoff,
+                             checkpoint_filepath = checkpointfile,
+                             flag_nopreprocess = args.no_preprocess )
+    
     daura.cluster_dict_to_text(clusters, args.centerfile, args.clusterfile)
 
 
@@ -59,7 +85,7 @@ if __name__ == '__main__':
     numeric_level = getattr(logging, args.loglevel.upper(), None)
     logger.setLevel(numeric_level)
     print "#################################"
-    print "## Program version",parallelclusterer.__version__
+    print "## Program version",pcl.__version__
     print "## Invoked with Following Arguments " 
     for key, value in vars(args).items():
         print "# %s = %s"%(key,value)

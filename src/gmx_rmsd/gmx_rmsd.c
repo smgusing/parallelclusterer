@@ -44,7 +44,7 @@
  #include "nrjac.h"
  #include "vec.h"
  #include "txtdump.h"
- #include "cmetric.h"
+ #include "gmx_rmsd.h"
  #include "smalloc.h"
  #include <omp.h>
                                         

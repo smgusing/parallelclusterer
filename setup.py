@@ -38,19 +38,28 @@ metadata = {
 # add the scipts, so they can be called from the command line
 scripts = [e for e in glob('scripts/*.py') if not e.endswith('__.py')]
 ## add cmetric
-cmetric = [Extension('_cmetric',sources=glob('src/c/*.c'),
+gmx_rmsd = Extension('_gmxrmsd',sources=glob('src/gmx_rmsd/*.c'),
                  extra_compile_args = ["-O3","-fopenmp","-fomit-frame-pointer",
                  "-finline-functions","-Wall","-Wno-unused","-msse2",
                  "-funroll-all-loops","-std=gnu99","-fexcess-precision=fast", "-pthread"],
                  extra_link_args = ["-lmd","-lgmx","-lfftw3f","-lnsl","-lm","-lgomp"],
-                 include_dirs = ["src/c"],
+                 include_dirs = ["src/gmx_rmsd"],
                  #library_dirs=['/home/gurpreet/sft/gmx455/lib'],
-                 )]
+                 )
+gmx_rmsd_custom1 = Extension('_gmxrmsd_custom1',sources=glob('src/gmx_rmsd_custom1/*.c'),
+                 extra_compile_args = ["-O3","-fopenmp","-fomit-frame-pointer",
+                 "-finline-functions","-Wall","-Wno-unused","-msse2",
+                 "-funroll-all-loops","-std=gnu99","-fexcess-precision=fast", "-pthread"],
+                 extra_link_args = ["-lmd","-lgmx","-lfftw3f","-lnsl","-lm","-lgomp"],
+                 include_dirs = ["src/gmx_rmsd_custom1"],
+                 #library_dirs=['/home/gurpreet/sft/gmx455/lib'],
+                 )
+
 
 setup(packages = ["parallelclusterer"],
       package_dir = {'parallelclusterer':'src'},
       ext_package = "parallelclusterer",
-      ext_modules = cmetric,
+      ext_modules = [gmx_rmsd,gmx_rmsd_custom1],
       scripts=scripts,
       **metadata)
 

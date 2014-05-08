@@ -15,5 +15,7 @@ logger.addHandler(sh)
 logger.propagate = False
 #########################################
 pth=os.path.dirname(os.path.abspath(__file__))
-libcmetricpath=("%s/_cmetric.so"%pth)
-cmetric = cdll.LoadLibrary(libcmetricpath)
+gmx_rmsd_path=("%s/_gmxrmsd.so"%pth)
+gmx_custom1_path=("%s/_gmxrmsd.so"%pth)
+_gmxrmsd = cdll.LoadLibrary(gmx_rmsd_path)
+_gmxrmsd_custom1 = cdll.LoadLibrary(gmx_custom1_path)
