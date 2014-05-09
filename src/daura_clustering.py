@@ -202,6 +202,7 @@ def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, metric, my_frames, 
     if mpi_size % 2 == 1:
         logger.debug("Single Inner neighbour counting at rank %s",my_rank)
         innerNeighbourCount(metric, cutoff, my_neighbour_count, my_frames)
+        logger.debug("Finished Single Inner neighbour counting at rank %s",my_rank)
 
     else:
         my_received_frames = Framecollection()
@@ -222,15 +223,17 @@ def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, metric, my_frames, 
             logger.debug("Two Inner neighbour counting at rank %s",my_rank)
             innerNeighbourCount(metric, cutoff, my_neighbour_count, my_frames)
             innerNeighbourCount(metric, cutoff, my_neighbour_count, my_received_frames)
+            logger.debug(" Finished Two Inner neighbour counting at rank %s",my_rank)
         else:
             logger.debug(" Outer neighbour counting at rank %s",my_rank)
             outerNeighbourCount(metric, cutoff, my_neighbour_count, my_frames, my_received_frames)
+            logger.debug(" Finished Outer neighbour counting at rank %s",my_rank)
 
     for k in xrange(1, (mpi_size+1)/2):
         T = time()
-        my_recieved_frames = Framecollection()
+        my_received_frames = Framecollection()
         mpi_send_lambda = my_frames.for_sending(comm)
-        mpi_recv_lambda = my_recieved_frames.for_receiving(comm)
+        mpi_recv_lambda = my_received_frames.for_receiving(comm)
 
 
         ring_schedule_k = manager.make_ring_schedule(k)
@@ -284,7 +287,6 @@ def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_frames):
             #neighbour_count_dict[the_frameID]  = the_count
                 
 
-
 def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_received_frames):
     """
     Notes:
@@ -296,6 +298,7 @@ def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_r
     received_frames_number_atoms  = my_received_frames.number_atoms
 
     count_buffer = np.zeros(received_frames_number_frames, dtype=np.int32)
+    
 
     for my_frameID in my_frames.globalIDs_iter:
         neighbour_count = my_metric.count_number_neighbours( 
@@ -314,6 +317,7 @@ def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_r
             neighbour_count_dict[other_frameID] += other_count
         except KeyError:
             neighbour_count_dict[other_frameID]  = other_count
+    
 
 # --------------------------------------------------------------------------------------------------------
 

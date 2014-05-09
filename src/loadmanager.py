@@ -42,7 +42,6 @@ class Loadmanager(object):
         transpose = lambda xs: zip(*xs)
         partitions = map(transpose, transposed_partitions)
         # transposed_partitions :: [([a0, a1, ...], [b0, b1, ...], ..)] # (conceptually)
-        
         # Record the range of frames assigned to each node.
         # (Lower bound is inclusive, upper bound is exclusive.)
         # Only valid if contiguous_divide_work groups the trajectories in contiguous ranges.
@@ -73,6 +72,7 @@ class Loadmanager(object):
         - items       :: [a]
         - return_type :: [[a]]
         """
+        
         logger.debug("Calculating load divisions")
         
         parts = [ [] for x in xrange(self.mpi_size) ]
