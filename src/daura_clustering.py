@@ -13,6 +13,7 @@ In-Progress: (not yet started).
 # External modules.
 from mpi4py import MPI
 import gp_grompy
+import txtreader
 # Built-in modules.
 
 import ctypes
@@ -348,7 +349,7 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
     - removed_vertices:
         a set of globalIDs of vertices that have been assigned to a cluster
     - mask_removed_vertices:
-        a list (numpy_array) recording, for each vertex in my_container, whether it has been
+        a list (numpy_array) recording, for each vertex in my_frames, whether it has been
         assigned to a cluster, where
             - a zero in the i'th index represents that the vertex with localID i has not been assigned
                 and non-zero value represents that the vertex has been assigned.
@@ -600,154 +601,140 @@ def cluster_dict_to_text(clusters, centers_filepath, clusters_filepath):
     return None
 
 
-# def refine(project_filepath, cutoff,centerfile):
-#     # Initialize MPI.
-#     comm = MPI.COMM_WORLD
-#     mpi_size = comm.Get_size()
-#     my_rank = comm.Get_rank()
-#     comm.Barrier()
-# 
-#     # Print only at node 0.
-# #     def my_print(x):
-# #         print x
-# #     print0 = lambda x: my_print(x) if my_rank == 0 else None
-# 
-#     # Say hello.
-#     print0(rank=my_rank,msg=" Initialized MPI.")
-#     logger.debug("Hello, from node %s",my_rank)
-# 
-#     # Load project file.
-#     print0(rank=my_rank,msg=" Reading project yaml file.")
-#     my_project = Project(existing_project_file = project_filepath)
-# 
-# 
-#     # Instantiate Metric class.
-#     if my_rank == 0:
-#         my_metric = Metric(tpr_filepath = my_project.get_tpr_filepath(),
-#                                   ndx_filepath = my_project.get_ndx_filepath(),
-#                                   number_dimensions = my_project.get_number_dimensions(), )
-#         my_metric.destroy_pointers()
-#     else:
-#         my_metric = None
-# 
-#     my_metric = comm.bcast(my_metric, root=0)
-#     print0(rank=my_rank,msg="metric object broadcasted.")
-# 
-#     my_metric.create_pointers()
-# 
-# 
-#     # ----------------------------------------------------------------
-#     # Divide trajectories between nodes.
-#     # Get trajectory data.
-# 
-#     # Read.
-#     trajectory_lengths = my_project.get_trajectory_lengths()
-#     trajectory_filepaths = my_project.get_trajectory_filepaths()
-#     
-#     # Offests and Ranges.
-#     cumulative_sum = lambda xs: functional.scanl(lambda x,y: x+y, xs)
-# 
-#     trajectory_ID_offsets = [0] + cumulative_sum(trajectory_lengths)[:-1]
-#     trajectory_ID_ranges = zip(trajectory_ID_offsets, cumulative_sum(trajectory_lengths))
-# 
-#     # Divide work.
-#     costs = trajectory_lengths
-#     items = zip(trajectory_filepaths, trajectory_lengths,
-#                 trajectory_ID_offsets, trajectory_ID_ranges)
-# 
-#     print0(rank=my_rank,msg=" Dividing trajectories between nodes.")
-#     cost_sums, partitions = parallel.divide_work(mpi_size, costs, items)
-#     # partitions :: [[(a,b,..)]]
-# 
-#     transpose = lambda xs: zip(*xs)
-#     transposed_partitions = map(transpose, partitions)
-#     # transposed_partitions :: [([a0, a1, ...], [b0, b1, ...], ..)] # (conceptually)
-# 
-#     (parts_trajectory_filepaths, parts_trajectory_lengths, \
-#         parts_trajectory_ID_offsets, parts_trajectory_ID_ranges) = \
-#         map(list, zip(*transposed_partitions))
-# 
-#     # Take work share.
-#     my_partition = transposed_partitions[my_rank]
-#     
-#     (my_trajectory_filepaths, my_trajectory_lengths, \
-#         my_trajectory_ID_offsets, my_trajectory_ID_ranges) = \
-#         map(list, my_partition)
-# 
-#     # Record the range of frames assigned to each node.
-#     # (Lower bound is inclusive, upper bound is exclusive.)
-#     # Only valid if contiguous_divide_work groups the trajectories in contiguous ranges.
-#     # Note that when striding != 1 this is not a contiguous range of frames that a node stores.
-#     frame_globalID_distribution = list(parts_trajectory_ID_ranges)
-# 
-#     #print0(my_rank,"\tDistribution: {0}".format(frame_globalID_distribution))
-#     print0(rank=my_rank,msg="Reading trajectories at {0}.".format(my_rank))
-#     my_container = Container.from_files(
-#             stride = 1,
-#             trajectory_type = my_project.get_trajectory_type(),
-#             trajectory_globalID_offsets = my_trajectory_ID_offsets,
-#             trajectory_filepath_list = my_trajectory_filepaths,
-#             trajectory_length_list = my_trajectory_lengths, )
-# 
-#         
-#     # ----------------------------------------------------------------
-#     # Preprocess trajectories (modifying them in-place).
-#     # Metric preprocessing.
-# #    print0(my_rank,"[Cluster] Preprocessing trajectories (for Metric).")
-# #    my_metric.preprocess(   frame_array_pointer = my_container.get_first_frame_pointer(),
-# #                            number_frames = my_container.number_frames(),
-# #                            number_atoms = my_container.number_atoms(), )
-# 
-#     clustercenters = txtreader.readcols(centerfile)[:,1]
-# 
-#     clusters = {} # :: FrameID (cluster center) -> [FrameID] (the cluster -- its list of frames)
-#     my_unclustered = set([i for i in my_container.globalIDs_iter])
-#     removed_vertices = set()
-# 
-#     for center_id in clustercenters:
-#         center_host_node = find_node_of_frame(center_id, frame_globalID_distribution)
-#         if center_host_node is None:
-#             raise KeyError("Next cluster center ID not found within any node.")
-#             
-# 
-#         # Broadcasting of center.
-#         if my_rank == center_host_node:
-#             center_frame = my_container.get_frame(center_id)
-#         else:
-#             shape = (my_container.number_atoms(), 3)
-#             center_frame = np.empty(shape, dtype=container.NumpyFloat)
-# 
-#         comm.Bcast([center_frame, container.MPIFloat], root=center_host_node)
-#         center_frame_pointer = center_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
-#         rmsd_buffer = np.empty(my_container.number_frames(), dtype=container.NumpyFloat)
-# 
-#         my_metric.compute_distances( 
-#             reference_frame_pointer = center_frame_pointer,
-#             frame_array_pointer = my_container.get_first_frame_pointer(),
-#             number_frames = my_container.number_frames(),
-#             number_atoms = my_container.number_atoms(),
-#             real_output_buffer = rmsd_buffer, # writes results to this buffer.
-#             mask_ptr = None,
-#             mask_dummy_value = -1.0,
-#             )
-#         
-#         fst = lambda x: x[0]
-#         existsAndWithinCutoff = lambda x: (x[0] not in removed_vertices) and (0.0 <= x[1] <= cutoff)
-#         my_members = map(fst, filter(existsAndWithinCutoff,
-#                         zip(my_container.globalIDs_iter, rmsd_buffer))) # for striding.
-# 
-#         # Broadcasting of members.
-#         members_gathered = comm.allgather(my_members)
-#         members = list(itertools.chain(*members_gathered))
-#         removed_vertices.update(members)
-#         clusters[center_id] = list(members)
-#         my_unclustered = my_unclustered.difference(set(members))
-#     unclustered_gathered = comm.allgather(my_unclustered)
-#     unclustered = list(itertools.chain(*unclustered_gathered))
-#     print unclustered
-#     for i in unclustered:
-#         clusters[i]=[i]
-#         
-#     return clusters 
-#      
-#     
+def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
+    # Initialize MPI.
+    comm = MPI.COMM_WORLD
+    mpi_size = comm.Get_size()
+    my_rank = comm.Get_rank()
+    comm.Barrier()
+ 
+    # Print only at node 0.
+#     def my_print(x):
+#         print x
+#     print0 = lambda x: my_print(x) if my_rank == 0 else None
+ 
+    # Say hello.
+    print0(rank=my_rank,msg=" Initialized MPI.")
+    logger.debug("Hello, from node %s",my_rank)
+ 
+    # Load project file.
+    print0(rank=my_rank,msg=" Reading project yaml file.")
+    project = Project(existing_project_file = project_filepath)
+ 
+    logger.debug("Initializing manager at node %s",my_rank)
+    manager = Loadmanager(project.get_trajectory_lengths(),
+                          project.get_trajectory_filepaths(),
+                          mpi_size,my_rank)
+
+    # Instantiate Metric class.
+    if my_rank == 0:
+        metric = Metric(tpr_filepath = project.get_tpr_filepath(),
+                                  ndx_filepath = project.get_ndx_filepath(),
+                                  number_dimensions = project.get_number_dimensions(), )
+        metric.destroy_pointers()
+    else:
+        metric = None
+ 
+    metric = comm.bcast(metric, root=0)
+    print0(rank=my_rank,msg="metric object broadcasted.")
+ 
+    metric.create_pointers()
+    
+    manager.do_partition()
+    # Take work share.
+    my_partition = manager.get_myworkshare()
+
+ 
+    (my_trajectory_filepaths, my_trajectory_lengths, \
+        my_trajectory_ID_offsets, my_trajectory_ID_ranges) = \
+        map(list, my_partition)
+ 
+    logger.info("Reading trajectories at %s",my_rank)
+    my_frames = Framecollection.from_files(
+            stride = 1,
+            trajectory_type = project.get_trajectory_type(),
+            trajectory_globalID_offsets = my_trajectory_ID_offsets,
+            trajectory_filepath_list = my_trajectory_filepaths,
+            trajectory_length_list = my_trajectory_lengths, )
+
+        
+    if flag_nopreprocess == False:
+        # ----------------------------------------------------------------
+        # Preprocess trajectories (modifying them in-place).
+        # Metric preprocessing.
+        logger.debug(" Preprocessing trajectories at rank %s",my_rank)
+        metric.preprocess( frame_array_pointer = my_frames.get_first_frame_pointer(),
+                           number_frames = my_frames.number_frames,
+                           number_atoms = my_frames.number_atoms)
+    else:
+        
+        print0(rank=my_rank,msg=" Will not preprocess trajectories")
+
+         
+    # ----------------------------------------------------------------
+    # Preprocess trajectories (modifying them in-place).
+    # Metric preprocessing.
+#    print0(my_rank,"[Cluster] Preprocessing trajectories (for Metric).")
+#    my_metric.preprocess(   frame_array_pointer = my_frames.get_first_frame_pointer(),
+#                            number_frames = my_frames.number_frames(),
+#                            number_atoms = my_frames.number_atoms(), )
+ 
+    clustercenters = txtreader.readcols(centerfile)[:,1]
+ 
+    clusters = {} # :: FrameID (cluster center) -> [FrameID] (the cluster -- its list of frames)
+    my_unclustered = set([i for i in my_frames.globalIDs_iter])
+    removed_vertices = set()
+ 
+    for center_id in clustercenters:
+        center_host_node = manager.find_node_of_frame(center_id)
+        if center_host_node is None:
+            raise KeyError("Next cluster center ID not found within any node.")
+             
+        
+        # Broadcasting of center.
+        if my_rank == center_host_node:
+            center_frame = my_frames.get_frame(center_id)
+        else:
+            shape = (my_frames.number_atoms(), 3)
+            center_frame = np.empty(shape, dtype=my_frames.frames.dtype)
+        
+        comm.Bcast([center_frame, my_frames.mpi_frametype], root=center_host_node)
+        
+        
+        center_frame_pointer = center_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
+        rmsd_buffer = np.empty(my_frames.number_frames, dtype=my_frames.frames.dtype)
+        
+        metric.compute_distances( 
+            reference_frame_pointer = center_frame_pointer,
+            frame_array_pointer = my_frames.get_first_frame_pointer(),
+            number_frames = my_frames.number_frames(),
+            number_atoms = my_frames.number_atoms(),
+            real_output_buffer = rmsd_buffer, # writes results to this buffer.
+            mask_ptr = None,
+            mask_dummy_value = -1.0,
+            )
+         
+        fst = lambda x: x[0]
+        existsAndWithinCutoff = lambda x: (x[0] not in removed_vertices) and (0.0 <= x[1] <= cutoff)
+        my_members = map(fst, filter(existsAndWithinCutoff,
+                        zip(my_frames.globalIDs_iter, rmsd_buffer))) # for striding.
+        
+        # Broadcasting of members.
+        members_gathered = comm.allgather(my_members)
+        members = list(itertools.chain(*members_gathered))
+        
+        removed_vertices.update(members)
+        clusters[center_id] = list(members)
+        
+        my_unclustered = my_unclustered.difference(set(members))
+        
+    unclustered_gathered = comm.allgather(my_unclustered)
+    unclustered = list(itertools.chain(*unclustered_gathered))
+    logger.debug("Unclustered %s", unclustered)
+    
+    for i in unclustered:
+        clusters[i]=[i]
+         
+    return clusters 
+      
+     
