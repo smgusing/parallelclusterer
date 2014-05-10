@@ -612,7 +612,7 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
 #     def my_print(x):
 #         print x
 #     print0 = lambda x: my_print(x) if my_rank == 0 else None
- 
+    logger.info("refine start")
     # Say hello.
     print0(rank=my_rank,msg=" Initialized MPI.")
     logger.debug("Hello, from node %s",my_rank)
@@ -629,8 +629,10 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
     # Instantiate Metric class.
     if my_rank == 0:
         metric = Metric(tpr_filepath = project.get_tpr_filepath(),
-                                  ndx_filepath = project.get_ndx_filepath(),
-                                  number_dimensions = project.get_number_dimensions(), )
+                       stx_filepath = project.get_gro_filepath(),
+                       ndx_filepath = project.get_ndx_filepath(),
+                       number_dimensions = project.get_number_dimensions() )
+        
         metric.destroy_pointers()
     else:
         metric = None
@@ -707,8 +709,8 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
         metric.compute_distances( 
             reference_frame_pointer = center_frame_pointer,
             frame_array_pointer = my_frames.get_first_frame_pointer(),
-            number_frames = my_frames.number_frames(),
-            number_atoms = my_frames.number_atoms(),
+            number_frames = my_frames.number_frames,
+            number_atoms = my_frames.number_atoms,
             real_output_buffer = rmsd_buffer, # writes results to this buffer.
             mask_ptr = None,
             mask_dummy_value = -1.0,
@@ -734,6 +736,8 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
     
     for i in unclustered:
         clusters[i]=[i]
+
+    logger.info("refine end")
          
     return clusters 
       

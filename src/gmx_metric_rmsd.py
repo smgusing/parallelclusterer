@@ -41,7 +41,7 @@ class Gmx_metric_rmsd(Gmx_metric):
         Obtains all information about the frames that is required to perform the metric computation.
         No other information is gathered at a later time.
         """
-        super(Gmx_metric_rmsd,self).__init__(tpr_filepath,stx_filepath, ndx_filepath,number_dimensions)
+        super(Gmx_metric_rmsd,self).__init__(tpr_filepath,stx_filepath,ndx_filepath,number_dimensions)
         
 
 

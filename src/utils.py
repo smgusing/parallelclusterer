@@ -13,23 +13,11 @@ from gp_grompy import libgmx, rvec, matrix, \
 from ctypes import byref, c_int, c_uint, c_float, cdll, POINTER, Structure
 import txtreader
 from project import Project
-from parallelclusterer.rms_metric import Metric  
-from parallelclusterer.container import Container
-
-# from gp_tools.cluster.rmsfit import Rmsfit
-# import networkx as nx
-# from msmbuilder import io
+from framecollection import Framecollection
 import logging
-logger = logging.getLogger()
-#logger.setLevel(logging.DEBUG)
-logger.setLevel(logging.INFO)
-# ch = logging.StreamHandler()
-# formatter = logging.Formatter(fmt='%(levelname)s:%(message)s')
-# ch.setFormatter(formatter)
-# logger.addHandler(ch)
 
 
-
+logger = logging.getLogger(__name__)
 # #POINTERTYPES
 c_int_p = POINTER(c_int)
 c_real_p = POINTER(c_real)
@@ -60,21 +48,23 @@ def split(longlist, lengths):
     return output
 
 
-
+## bad bad class######
 
 class Utilities():
     ''' contains utilities to perform analysis on cluster output
     '''
 
-    def __init__(self, projfn="my_project.yaml", clcenterfn="centers.txt",
+    def __init__(self, Metric, projfn="my_project.yaml", 
+                 clcenterfn="centers.txt",
                  clusterfn="clusters.txt",
-                 stepsize=None, timestep=None, stride=1):
+                 stepsize=None, timestep=None, 
+                 stride=1,flag_nopreprocess=False):
         '''
         load the project information and cluster output
         '''
-        
         prj = Project(existing_project_file=projfn)
         trajs_lengths = np.array(prj.get_trajectory_lengths())
+        
         # frame numbers always correspond to full trajectory irrespective of stride
         #trajs_lengths = trajs_lengths 
         self.trajs_lengths = trajs_lengths.astype(np.int)
@@ -82,13 +72,17 @@ class Utilities():
         self.ntrajs = len(self.trajnames)
         self.stride = prj.get_stride()
         self.frames_per_traj=np.ceil(self.trajs_lengths/(self.stride*1.))
- 
+        
         self.ndim = prj.get_number_dimensions()
         self.trajectory_type = prj.get_trajectory_type()
 
         self.grof = prj.gro_filepath
         self.tprf = prj.tpr_filepath
         self.ndxf = prj.ndx_filepath
+        
+        self.Metric = Metric
+        # # Get input data
+
 
         centids = txtreader.readcols(clcenterfn)
         self.centids = centids[:, 1]
@@ -176,7 +170,7 @@ class Utilities():
              
                    
     
-    def get_cluster(self, clid, nconfs=0):
+    def get_cluster(self, clid, nconfs=0,flag_nopreprocess = False):
         '''Get aligned clustermembers back'''
      
         #nodesizes = np.bincount(self.assignments[self.assignments > -1])
@@ -227,34 +221,31 @@ class Utilities():
         traj2 = np.vstack(traj2)
         traj = np.vstack([traj1, traj2])
         
-        # # Get input data
-        rmsmetric = Metric(tpr_filepath=self.tprf, ndx_filepath=self.ndxf, number_dimensions=self.ndim)
         # # Hack to use container class so that I can pass data to metric class
         # # TODO: need a better solution
         globalIDs=np.arange(len(traj))
-        localIDs = dict(zip(globalIDs,globalIDs))
+        localIDs = np.copy(globalIDs)
         
-        traj_container = Container(globalIDs = globalIDs,
+        traj_container = Framecollection(globalIDs = globalIDs,
                                    localIDs = localIDs,
-                                   array = traj
-                                   )
+                                   frames = traj)
         
-#        rmsmetric.preprocess(
-#                frame_array_pointer = traj_container.get_first_frame_pointer(),
-#                number_frames = traj_container.number_frames,
-#                number_atoms = traj_container.number_atoms)
+        metric = self.Metric(tpr_filepath=self.tprf, 
+                                ndx_filepath=self.ndxf, 
+                                stx_filepath = self.grof,
+                                number_dimensions=self.ndim)
+        
+        
+        
+        if flag_nopreprocess == False:
+            logger.info("will do preprocessing")
+            metric.preprocess(
+                    frame_array_pointer = traj_container.get_first_frame_pointer(),
+                    number_frames = traj_container.number_frames,
+                    number_atoms = traj_container.number_atoms)
         
         rmsd = np.zeros(len(traj), dtype=np.float32)
-        rmsmetric.fit_trajectory(traj_container, 0, rmsd)
-#         rmsmetric.compute_distances(
-#              reference_frame_pointer=traj_container.get_frame_pointer(0),
-#              frame_array_pointer=traj_container.get_first_frame_pointer(),
-#              number_frames = traj_container.get_number_frames,
-#              number_atoms = traj_container.get_number_atoms,
-#              real_output_buffer = rmsd,
-#              mask_ptr = None,
-#              mask_dummy_value = -1.0,
-#              )
+        metric.fit_trajectory(traj_container, 0, rmsd)
 
         np.savetxt('rmsd.txt', rmsd)
         gxout.write_array_as_traj(outf, traj_container.array, boxs, times, prec)
@@ -310,7 +301,7 @@ class Utilities():
         outfile1 = outfile.replace('.dot', '.gml')
         nx.write_gml(G, outfile1)
      
-    def get_dmatrix(self,xtcfile, nframes):
+    def get_dmatrix(self,xtcfile, nframes, flag_nopreprocess = False):
         """
         Not working yet
  
@@ -323,24 +314,30 @@ class Utilities():
         traj = gx.load_traj(xtcfile, stride, bPBC, nframes)
         natoms = traj.shape[1]
         nframes = traj.shape[0]
-        rmsmetric = Metric(self.tprf, self.ndxf, self.ndim)
-        globalIDs = np.arange(len(traj))
-        localIDs = dict(zip(globalIDs,globalIDs))
+        # # TODO: need a better solution
+        globalIDs=np.arange(len(traj))
+        localIDs = np.copy(globalIDs)
         
-        traj_container = Container(globalIDs = globalIDs,
+        traj_container = Framecollection(globalIDs = globalIDs,
                                    localIDs = localIDs,
-                                   array = traj
-                                   )
+                                   frames = traj)
+        metric = self.Metric(tpr_filepath=self.tprf, 
+                                ndx_filepath=self.ndxf, 
+                                stx_filepath = self.grof,
+                                number_dimensions=self.ndim)
         
-#        rmsmetric.preprocess(
-#                frame_array_pointer = traj_container.get_first_frame_pointer(),
-#                number_frames = traj_container.number_frames,
-#                number_atoms = traj_container.number_atoms)
+        if flag_nopreprocess == False:
+            logger.info("will do preprocessing")
+            metric.preprocess(
+                    frame_array_pointer = traj_container.get_first_frame_pointer(),
+                    number_frames = traj_container.number_frames,
+                    number_atoms = traj_container.number_atoms)
+        
         
         rmsd = np.zeros(len(traj), dtype=np.float32)
         weights = []
         for k in range(nframes - 1):
-            rmsmetric.fit_trajectory(traj_container, k, rmsd)
+            self.metric.fit_trajectory(traj_container, k, rmsd)
             for j in range(k+1, rmsd.size):
                 weights.append((k,j,rmsd[j]))
                 
@@ -352,7 +349,6 @@ class Utilities():
         
         weights = self.get_dmatrix(centxtcfile, nframes)
         # ##Get Populations
-        prop = []
         matrixfn = "rmsdmatrix.npy"
         np.save(matrixfn, weights)
         
