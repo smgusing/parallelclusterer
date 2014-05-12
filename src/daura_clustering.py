@@ -294,30 +294,38 @@ def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_r
     - Updates neighbour_count_dict in-place.
     """
 
-    received_frames_pointer = my_received_frames.get_first_frame_pointer()
-    received_frames_number_frames = my_received_frames.number_frames
-    received_frames_number_atoms  = my_received_frames.number_atoms
+    frame_array0_idx = np.arange(my_frames.number_frames,dtype=np.int32)
+    frame_array1_idx = np.arange(my_received_frames.number_frames,dtype=np.int32)
+    
+    frame_array0_count = np.zeros(my_frames.number_frames,dtype=np.int32)
+    frame_array1_count = np.zeros(my_received_frames.number_frames,dtype=np.int32)
 
-    count_buffer = np.zeros(received_frames_number_frames, dtype=np.int32)
+    my_metric.count_neighbours_between( 
+        cutoff                  = cutoff,
+        frame_array0_pointer = my_frames.get_first_frame_pointer(),
+        frame_array1_pointer    = my_received_frames.get_first_frame_pointer(),
+        frame_array0_number     = my_frames.number_frames,
+        frame_array1_number     = my_received_frames.number_frames,
+        frame_array0_idx        = frame_array0_idx,
+        frame_array1_idx        = frame_array1_idx,
+        frame_array0_count      = frame_array0_count,
+        frame_array1_count      = frame_array1_count,
+        frame_array0_idxsize     = my_frames.number_frames,
+        frame_array1_idxsize     = my_received_frames.number_frames,
+        number_atoms            = my_frames.number_atoms )
+
+    for array0_frameID, array0_count in zip(my_frames.globalIDs_iter, frame_array0_count):
+        try:
+            neighbour_count_dict[array0_frameID] += array0_count
+        except KeyError:
+            neighbour_count_dict[array0_frameID]  = array0_count
     
 
-    for my_frameID in my_frames.globalIDs_iter:
-        neighbour_count = my_metric.count_number_neighbours( 
-            cutoff                  = cutoff,
-            reference_frame_pointer = my_frames.get_frame_pointer(my_frameID),
-            frame_array_pointer     = received_frames_pointer,
-            number_frames           = received_frames_number_frames,
-            number_atoms            = received_frames_number_atoms,
-            int_output_buffer       = count_buffer,
-            )
-
-        neighbour_count_dict[my_frameID] += neighbour_count
-
-    for other_frameID, other_count in zip(my_received_frames.globalIDs_iter, count_buffer):
+    for array1_frameID, array1_count in zip(my_received_frames.globalIDs_iter, frame_array1_count):
         try:
-            neighbour_count_dict[other_frameID] += other_count
+            neighbour_count_dict[array1_frameID] += array1_count
         except KeyError:
-            neighbour_count_dict[other_frameID]  = other_count
+            neighbour_count_dict[array1_frameID]  = array1_count
     
 
 # --------------------------------------------------------------------------------------------------------
@@ -394,7 +402,7 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
                 center_degree = degree
                 center_id = frameID
                     
-        print0(rank=my_rank,msg="Center Frame %s. Members %s"%(center_id,center_degree))
+        print0(rank=my_rank,msg="Center Frame %s: Members %s"%(center_id,center_degree))
         center_host_node = manager.find_node_of_frame(center_id)
         if center_host_node is None:
             raise KeyError("Next cluster center ID not found within any node.")
@@ -443,8 +451,7 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
 
         # Check consistency of data.
         if len(members) != center_degree:
-            error_string = "Number of cluster members ({0}) is not the same as the degree of the center\
-                            vertex ({1})".format(len(members), center_degree)
+            error_string = "Number of cluster members ({0}) & degree of the center vertex ({1}) are different".format(len(members), center_degree)
             print0(rank=my_rank,msg='members %s'%(members))
             logger.error(error_string)
             

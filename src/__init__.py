@@ -9,7 +9,8 @@ __version__ = pkgres.require("parallelclusterer")[0].version
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 sh = logging.StreamHandler(sys.stdout)
-formatter = logging.Formatter(fmt='[%(name)s] %(message)s')
+#formatter = logging.Formatter(fmt='[%(name)s] %(message)s')
+formatter = logging.Formatter(fmt='[%(asctime)s %(name)s] %(message)s',datefmt='%I:%M:%S')
 sh.setFormatter(formatter)
 logger.addHandler(sh)
 logger.propagate = False

@@ -244,6 +244,76 @@ int oneToMany_countWithinRmsd(
     return count;
 }
 
+
+void manytomany_between(
+    real cutoff, rvec *traj0, rvec *traj1,
+    int traj0_size, int traj1_size,
+    int *traj0_idx,  int *traj1_idx,
+    int *traj0_count, int *traj1_count,
+    int traj0_idxsize, int traj1_idxsize,
+    int number_atoms, int number_dimensions,
+    real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size )
+{
+	/*
+	 * function to count number of neigbours for traj0 and traj1
+	 * using only the frames mentioned in traj0_idx and traj1_idx
+	 * The counts are updated in traj0_count and traj1_count.
+	 * Note: For correct counting, the count array MUST have zeros in them.
+	 * and the size should be same as trajsize
+	 */
+	int i,j;
+    real rmsd;
+    rvec *reference_frame,*object_frame; // Points to a frame from frame_array.
+
+    #pragma omp parallel private(reference_frame, object_frame, rmsd)
+    {
+    	int traj0_count_priv[traj0_size];
+    	int traj1_count_priv[traj1_size];
+		for (i=0; i<traj0_size; i++)
+		{
+			traj0_count_priv[i] = 0;
+		}
+		for (j=0; j<traj1_size; j++)
+		{
+			traj1_count_priv[j] = 0;
+		}
+
+    	#pragma omp for
+    	for (i = 0; i < traj0_idxsize; i++)
+    	{
+    		reference_frame =  traj0 + (traj0_idx[i] * number_atoms);
+
+    		for (j = 0; j < traj1_idxsize; j++)
+    		{
+    			object_frame =  traj1 + (traj1_idx[j] * number_atoms);
+    			rmsd = computeRmsd(reference_frame, object_frame, number_atoms,
+                        number_dimensions, fitting_weights, rms_indices, rms_weights, rms_size);
+                if (rmsd <= cutoff)
+                {
+                	traj0_count_priv[traj0_idx[i]]++;
+                	traj1_count_priv[traj1_idx[j]]++;
+                }
+    		}
+    	}
+		#pragma omp critical
+    	{
+    		for (i=0; i<traj0_size; i++)
+    		{
+    			traj0_count[i] += traj0_count_priv[i];
+    		}
+    		for (j=0; j<traj1_size; j++)
+    		{
+    			traj1_count[j] += traj1_count_priv[j];
+    		}
+
+
+    	}
+	}
+
+}
+
+
+
 // ================================================================
 // Old versions -- will delete when new ones are working.
 // Gurpreet: I can use this one for alignment, no need to delete for now

@@ -48,6 +48,7 @@ class Gmx_metric(object):
 
         # Set number of dimensions.
         self.number_dimensions = number_dimensions
+        self.number_dimensions_c = ctypes.c_int(number_dimensions)
         number_of_index_groups = 2 # Ask for two index groups: ...
         #
         if ndx_filepath is not None:

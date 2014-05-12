@@ -1,5 +1,3 @@
-// hey, how do header files work?
-
 /*
  * 
  *                This source code is part of
@@ -105,6 +103,25 @@ void manyToMany_countWithinRmsd(
     int *rms_indices, real *rms_weights, real *fitting_weights,
     rvec *frame_array0, int *count_buffer0, int frame_array_size0,
     rvec *frame_array1, int *count_buffer1, int frame_array_size1);
+
+
+/*
+ * function to count number of neigbours for traj0 and traj1
+ * using only the frames mentioned in traj0_idx and traj1_idx
+ * The counts are updated in traj0_count and traj1_count.
+ * Note: For correct counting, the count array MUST have zeros in them .
+ *
+ */
+void manytomany_between(  real cutoff, rvec *traj0, rvec *traj1,
+    int traj0_size, int traj1_size,
+    int *traj0_idx,  int *traj1_idx,
+    int *traj0_count, int *traj1_count,
+    int traj0_idxsize, int traj1_idxsize,
+    int number_atoms, int number_dimensions,
+    real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size );
+
+
+
 
 /* Old functions. */
 void distance_onetomany(
