@@ -265,7 +265,7 @@ void manytomany_between(
     real rmsd;
     rvec *reference_frame,*object_frame; // Points to a frame from frame_array.
 
-    #pragma omp parallel private(reference_frame, object_frame, rmsd)
+    #pragma omp parallel
     {
     	int traj0_count_priv[traj0_size];
     	int traj1_count_priv[traj1_size];
@@ -278,7 +278,7 @@ void manytomany_between(
 			traj1_count_priv[j] = 0;
 		}
 
-    	#pragma omp for
+    	#pragma omp for private(reference_frame, object_frame, rmsd, j )
     	for (i = 0; i < traj0_idxsize; i++)
     	{
     		reference_frame =  traj0 + (traj0_idx[i] * number_atoms);
@@ -295,6 +295,7 @@ void manytomany_between(
                 }
     		}
     	}
+
 		#pragma omp critical
     	{
     		for (i=0; i<traj0_size; i++)
@@ -305,8 +306,6 @@ void manytomany_between(
     		{
     			traj1_count[j] += traj1_count_priv[j];
     		}
-
-
     	}
 	}
 
