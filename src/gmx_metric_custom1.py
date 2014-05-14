@@ -95,6 +95,35 @@ class Gmx_metric_custom1(Gmx_metric):
 
         return count
     
+    def count_neighbours_between(self, cutoff, frame_array0_pointer, frame_array1_pointer, 
+            frame_array0_number, frame_array1_number, frame_array0_idx,
+            frame_array1_idx,frame_array0_count,frame_array1_count,
+            frame_array0_idxsize,frame_array1_idxsize, number_atoms):
+            # making new arguments have default values to prevent breaking
+            # but we should eventually properly update all calls to the function
+
+        cutoff_c = gp_grompy.c_real(cutoff)
+        frame_array0_number_c = ctypes.c_int(frame_array0_number)
+        frame_array1_number_c =ctypes.c_int(frame_array1_number)
+        frame_array0_idx_ptr = frame_array0_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+        frame_array1_idx_ptr = frame_array1_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+        frame_array0_count_ptr = frame_array0_count.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+        frame_array1_count_ptr = frame_array1_count.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+        frame_array0_idxsize_c = ctypes.c_int(frame_array0_idxsize)
+        frame_array1_idxsize_c = ctypes.c_int(frame_array1_idxsize)
+        number_atoms_c         = ctypes.c_int(number_atoms)
+        
+        cmetric.manytomany_between(
+            cutoff_c, frame_array0_pointer, frame_array1_pointer, 
+            frame_array0_number_c, frame_array1_number_c,
+            frame_array0_idx_ptr, frame_array1_idx_ptr,
+            frame_array0_count_ptr, frame_array1_count_ptr,
+            frame_array0_idxsize_c, frame_array1_idxsize_c,
+            number_atoms_c, self.number_dimensions_c, self.fitting_weights_ptr,
+            self.rms_indices_ptr, self.rms_weights_ptr, self.rms_size )
+
+    
+    
     def fit_trajectory(self,traj_container,ref_frno,real_output_buffer):
         ''' Function to fit a given frame number to all the frames in a trajectory.
             The fitted trajectory is returned.

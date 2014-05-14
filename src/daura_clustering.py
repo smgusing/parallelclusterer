@@ -708,7 +708,7 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
             center_frame = np.empty(shape, dtype=my_frames.frames.dtype)
         
         comm.Bcast([center_frame, my_frames.mpi_frametype], root=center_host_node)
-        
+        if my_rank == 0 : logger.debug("Searching for members for center id %s", center_id)
         
         center_frame_pointer = center_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
         rmsd_buffer = np.empty(my_frames.number_frames, dtype=my_frames.frames.dtype)
@@ -731,7 +731,7 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
         # Broadcasting of members.
         members_gathered = comm.allgather(my_members)
         members = list(itertools.chain(*members_gathered))
-        
+        if my_rank == 0 : logger.debug("Found %s members",len(members))
         removed_vertices.update(members)
         clusters[center_id] = list(members)
         

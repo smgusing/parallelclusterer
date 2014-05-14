@@ -248,7 +248,7 @@ class Utilities():
         metric.fit_trajectory(traj_container, 0, rmsd)
 
         np.savetxt('rmsd.txt', rmsd)
-        gxout.write_array_as_traj(outf, traj_container.array, boxs, times, prec)
+        gxout.write_array_as_traj(outf, traj_container.frames, boxs, times, prec)
 
 
     def print_clustersizes(self):
