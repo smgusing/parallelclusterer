@@ -120,6 +120,14 @@ void manytomany_between(  real cutoff, rvec *traj0, rvec *traj1,
     int number_atoms, int number_dimensions,
     real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size );
 
+void manytomany_within(
+    real cutoff, rvec *traj0, //cutoff and pointer to the trajectory
+    int traj0_size,	// number of frames in the trajectory
+    int *traj0_idx, // array with frame numbers to be used
+    int *traj0_count, // neighbourhood counts for each frame
+    int traj0_idxsize, // size of the traj0_idx
+    int number_atoms, int number_dimensions,
+    real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size );
 
 
 

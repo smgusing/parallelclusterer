@@ -312,6 +312,66 @@ void manytomany_between(
 }
 
 
+void manytomany_within(
+    real cutoff, rvec *traj0,
+    int traj0_size,
+    int *traj0_idx,
+    int *traj0_count,
+    int traj0_idxsize,
+    int number_atoms, int number_dimensions,
+    real *fitting_weights, int *rms_indices, real *rms_weights, int rms_size )
+{
+	/*
+	 * function to count number of neigbours for traj0
+	 * using only the frames mentioned in traj0_idx
+	 * The counts are updated in traj0_count
+	 * Note: For correct counting, the count array MUST have zeros in them.
+	 * and the size should be same as trajsize
+	 *
+	 * Note: Self count is not included.
+	 */
+	int i,j;
+    real rmsd;
+    rvec *reference_frame,*object_frame; // Points to a frame from frame_array.
+
+    #pragma omp parallel
+    {
+    	int traj0_count_priv[traj0_size];
+		for (i=0; i<traj0_size; i++)
+		{
+			traj0_count_priv[i] = 0;
+		}
+
+    	#pragma omp for private(reference_frame, object_frame, rmsd, j )
+    	for (i = 0; i < traj0_idxsize-1; i++)
+    	{
+    		reference_frame =  traj0 + (traj0_idx[i] * number_atoms);
+
+    		for (j = i+1; j < traj0_idxsize; j++)
+    		{
+    			object_frame =  traj0 + (traj0_idx[j] * number_atoms);
+    			rmsd = computeRmsd(reference_frame, object_frame, number_atoms,
+                        number_dimensions, fitting_weights, rms_indices, rms_weights, rms_size);
+                if (rmsd <= cutoff)
+                {
+                	traj0_count_priv[traj0_idx[i]]++;
+                	traj0_count_priv[traj0_idx[j]]++;
+                }
+    		}
+    	}
+
+		#pragma omp critical
+    	{
+    		for (i=0; i<traj0_size; i++)
+    		{
+    			traj0_count[i] += traj0_count_priv[i];
+    		}
+    	}
+	}
+
+}
+
+
 
 // ================================================================
 // Old versions -- will delete when new ones are working.

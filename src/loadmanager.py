@@ -53,12 +53,6 @@ class Loadmanager(object):
         self.frame_globalID_distribution = list(parts_trajectory_ID_ranges)
         self.partitions = partitions
         
-    def get_myworkshare(self):
-        
-        logger.debug("Fetching workshare for %s: %s",self.my_rank, self.partitions[self.my_rank])
-        return self.partitions[self.my_rank]
-        
-        
         
 
     def _divide_work(self, costs, items):
@@ -155,11 +149,11 @@ class Loadmanager(object):
             send_rank, dest_rank = node_pair
             if my_rank == send_rank:
                 mpi_send_lambda(dest_rank)
-                logger.info("rank %s sending to %s ",my_rank, dest_rank )
+                logger.debug("rank %s sending to %s ",my_rank, dest_rank )
     
             elif my_rank == dest_rank:
                 mpi_recv_lambda(send_rank)
-                logger.info("rank %s recieving from %s ",my_rank, send_rank )
+                logger.debug("rank %s recieving from %s ",my_rank, send_rank )
     
 
     def find_node_of_frame(self,frameID):
@@ -171,5 +165,9 @@ class Loadmanager(object):
                     return node_id
         return None
 
-               
-     
+    @property
+    def myworkshare(self):
+        ''' returns workshare for the node'''
+        #logger.debug("Fetching workshare for %s: %s",
+        #self.my_rank, self.partitions[self.my_rank])
+        return self.partitions[self.my_rank]

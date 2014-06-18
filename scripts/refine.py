@@ -11,7 +11,7 @@ from parallelclusterer.gmx_metric_custom1 import Gmx_metric_custom1
 logger = logging.getLogger("parallelclusterer")
 
 parser = argparse.ArgumentParser(description='''
- perform clustering using Daura's clustering algorithm    
+ program to assign and refine clusters. (only assign for now)    
 ''', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 parser.add_argument("-projectfile", dest='projectfile', default='my_project.yaml',
@@ -51,7 +51,7 @@ def main(args):
         logger.error("%s not implimented",args.metric)
         raise SystemExit("Quitting on this")
 
-    clusters = daura.refine(Metric, args.projectfile, args.cutoff,
+    clusters = daura.assign(Metric, args.projectfile, args.cutoff,
                             args.oldcenterfile,
                             args.no_preprocess)
     daura.cluster_dict_to_text(clusters, args.centerfile, args.clusterfile)

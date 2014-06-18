@@ -27,7 +27,10 @@ import logging
 
 from project import Project
 from framecollection import Framecollection
-from loadmanager import Loadmanager 
+from loadmanager import Loadmanager
+
+from error_reporting import analyze_errorno1
+ 
 logger = logging.getLogger(__name__)
 
 # ================================================================
@@ -104,7 +107,7 @@ def cluster(Metric, project_filepath, cutoff, checkpoint_filepath=None,
     
     
     # Take work share.
-    my_partition = manager.get_myworkshare()
+    my_partition = manager.myworkshare
     
     (my_trajectory_filepaths, my_trajectory_lengths, \
      my_trajectory_ID_offsets, my_trajectory_ID_ranges) = \
@@ -248,44 +251,70 @@ def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, metric, my_frames, 
 
     return my_neighbour_count
 
-
 def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_frames):
     """
     Notes:
     - Updates neighbour_count_dict in-place.
-    the count buffer relies on reverse counting to properly count number of neighbours
-    Basically, we are comparining k (outerloop) with i (innerloop)
-    (where k =n to 0 and  i=0 to n-1) frame , and decrementing n each time.
-    Each time the_count_buffer[i] is incremented, if k and i are neighbours.
     """
-    the_frame_pointer = the_frames.get_first_frame_pointer()
-    the_number_atoms  = the_frames.number_atoms
-
-    the_count_buffer = np.zeros(the_frames.number_frames, dtype=np.int32)
     
-    for iter_limit, the_frameID in reversed(list(enumerate(the_frames.globalIDs_iter))):
-        neighbour_count = my_metric.count_number_neighbours( 
-            cutoff                  = cutoff,
-            reference_frame_pointer = the_frames.get_frame_pointer(the_frameID),
-            frame_array_pointer     = the_frame_pointer,
-            number_frames           = iter_limit, # Check only until the_frameID
-            number_atoms            = the_number_atoms,
-            int_output_buffer       = the_count_buffer,
-            )
+    frame_array0_idx = np.arange(the_frames.number_frames,dtype=np.int32)
+    the_count_buffer = np.zeros(the_frames.number_frames,dtype=np.int32)
 
-        try:
-            neighbour_count_dict[the_frameID] += neighbour_count
-        except KeyError:
-            neighbour_count_dict[the_frameID]  = neighbour_count
+    my_metric.count_neighbours_within( 
+        cutoff                  = cutoff,
+        frame_array0_pointer    = the_frames.get_first_frame_pointer(),
+        frame_array0_number     = the_frames.number_frames,
+        frame_array0_idx        = frame_array0_idx,
+        frame_array0_count      = the_count_buffer,
+        frame_array0_idxsize    = the_frames.number_frames,
+        number_atoms            = the_frames.number_atoms )
 
     for the_frameID, the_count in zip(the_frames.globalIDs_iter, the_count_buffer):
-        # Because of iter_limit, no frame is compared with itself, so add it here.
+        # Because no frame is compared with itself, so add it here.
         try:
-            neighbour_count_dict[the_frameID] += the_count + 1 
-            #neighbour_count_dict[the_frameID] += the_count 
+            neighbour_count_dict[the_frameID] += the_count + 1
+             
         except KeyError:
             neighbour_count_dict[the_frameID]  = the_count + 1
-            #neighbour_count_dict[the_frameID]  = the_count
+     
+
+# def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_frames):
+#     """
+#     Notes:
+#     - Updates neighbour_count_dict in-place.
+#     the count buffer relies on reverse counting to properly count number of neighbours
+#     Basically, we are comparining k (outerloop) with i (innerloop)
+#     (where k =n to 0 and  i=0 to n-1) frame , and decrementing n each time.
+#     Each time the_count_buffer[i] is incremented, if k and i are neighbours.
+#     """
+#     the_frame_pointer = the_frames.get_first_frame_pointer()
+#     the_number_atoms  = the_frames.number_atoms
+# 
+#     the_count_buffer = np.zeros(the_frames.number_frames, dtype=np.int32)
+#     
+#     for iter_limit, the_frameID in reversed(list(enumerate(the_frames.globalIDs_iter))):
+#         neighbour_count = my_metric.count_number_neighbours( 
+#             cutoff                  = cutoff,
+#             reference_frame_pointer = the_frames.get_frame_pointer(the_frameID),
+#             frame_array_pointer     = the_frame_pointer,
+#             number_frames           = iter_limit, # Check only until the_frameID
+#             number_atoms            = the_number_atoms,
+#             int_output_buffer       = the_count_buffer,
+#             )
+# 
+#         try:
+#             neighbour_count_dict[the_frameID] += neighbour_count
+#         except KeyError:
+#             neighbour_count_dict[the_frameID]  = neighbour_count
+# 
+#     for the_frameID, the_count in zip(the_frames.globalIDs_iter, the_count_buffer):
+#         # Because of iter_limit, no frame is compared with itself, so add it here.
+#         try:
+#             neighbour_count_dict[the_frameID] += the_count + 1 
+#             #neighbour_count_dict[the_frameID] += the_count 
+#         except KeyError:
+#             neighbour_count_dict[the_frameID]  = the_count + 1
+#             #neighbour_count_dict[the_frameID]  = the_count
                 
 
 def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_received_frames):
@@ -418,9 +447,6 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
         comm.Bcast([center_frame, my_frames.mpi_frametype ], root=center_host_node)
         
 
-        
-
-
         # Find, broadcast the frames of, and record the cluster members,
         # that is, the vertices adjacent to the cluster center,
 
@@ -438,10 +464,11 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
             mask_dummy_value        = -1.0,
             )
         
-        fst = lambda x: x[0]
-        existsAndWithinCutoff = lambda x: (x[0] not in removed_vertices) and (0.0 <= x[1] <= cutoff)
-        my_members = map(fst, filter(existsAndWithinCutoff,
-                        zip(my_frames.globalIDs_iter, rmsd_buffer)))
+        lower_bool = rmsd_buffer <= cutoff
+        upper_bool = rmsd_buffer >= 0
+        my_members =  my_frames.globalIDs[lower_bool * upper_bool]
+        my_members =np.setdiff1d(my_members,removed_vertices,assume_unique = True)
+
         # (note: using globalIDs here is necessary because we allow striding in the input frames)
 
         # Broadcasting of members.
@@ -454,9 +481,10 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
             error_string = "Number of cluster members ({0}) & degree of the center vertex ({1}) are different".format(len(members), center_degree)
             print0(rank=my_rank,msg='members %s'%(members))
             logger.error(error_string)
-            
-            
-            raise SystemExit("Exiting on this")
+            analyze_errorno1(comm, metric, my_frames, center_frame, 
+                     center_degree, center_id, clusters, removed_vertices, cutoff)
+
+            raise SystemExit("Exiting ")
 
 
         # Record new cluster, update 'removed_vertices' and 'mask_removed_vertices'.
@@ -471,7 +499,8 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
 
         # Broadcast of the member frames of the new cluster.
         shape = (my_frames.number_atoms, 3) # 3 because rvec has type c_real[3]
-
+        
+        #Note: I Need to confirm that Allgather sequence is by rank order. It is assumed here
         member_frames_byNode = [ [None] * len(xs) for xs in members_gathered ]
         for i, frames_sublist in enumerate(member_frames_byNode):
             if my_rank == i:
@@ -485,34 +514,46 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
             for j in xrange(len(frames_sublist)):
                 comm.Bcast([frames_sublist[j], my_frames.mpi_frametype], root=i)
 
-        member_frames = itertools.chain(*member_frames_byNode)
-
+        frame_array = np.array(list(itertools.chain(*member_frames_byNode)))
+        
+        if len(frame_array) != len(members):
+            logger.error("members retrieved %s . Expected %s", len(frame_array),len(members))
+            raise SystemExit("Member retrieved do not match expected members ... Exiting on this")
         
 
-
+        member_frames = Framecollection(frames = frame_array,
+                                        globalIDs = np.array(members,dtype=np.int32),
+                                        localIDs = np.arange(len(frame_array),dtype=np.int32),
+                                        )
         # Remove the newly clustered vertices from the graph,
         # and update the degrees of the remaining vertices.
 
         # For the remaining vertices:
         # count the number of adjacent vertices that were newly clustered 
-        my_frames_frame_pointer = my_frames.get_first_frame_pointer()
-        my_frames_number_frames = my_frames.number_frames
-        my_frames_number_atoms  = my_frames.number_atoms
 
-        count_buffer = np.zeros(my_frames_number_frames, dtype=np.int32)
         
-        for w_frame in member_frames:
-            w_frame_pointer = w_frame.ctypes.data_as(ctypes.POINTER(gp_grompy.rvec))
+        
+        # to get index of elements that are zero, and set astype to int32
+        frame_array0_idx = np.nonzero(mask_removed_vertices == 0)[0].astype(np.int32)
+        frame_array1_idx = np.arange(member_frames.number_frames,dtype=np.int32)
+        
+        count_buffer = np.zeros(my_frames.number_frames, dtype=np.int32)
+        frame_array1_count = np.zeros(member_frames.number_frames,dtype=np.int32)
+    
+        metric.count_neighbours_between( 
+            cutoff                  = cutoff,
+            frame_array0_pointer = my_frames.get_first_frame_pointer(),
+            frame_array1_pointer    = member_frames.get_first_frame_pointer(),
+            frame_array0_number     = my_frames.number_frames,
+            frame_array1_number     = member_frames.number_frames,
+            frame_array0_idx        = frame_array0_idx,
+            frame_array1_idx        = frame_array1_idx,
+            frame_array0_count      = count_buffer,
+            frame_array1_count      = frame_array1_count,
+            frame_array0_idxsize     = frame_array0_idx.size,
+            frame_array1_idxsize     = member_frames.number_frames,
+            number_atoms            = my_frames.number_atoms )
 
-            neighbour_count = metric.count_number_neighbours( 
-                cutoff                  = cutoff,
-                reference_frame_pointer = w_frame_pointer,
-                frame_array_pointer     = my_frames_frame_pointer,
-                number_frames           = my_frames_number_frames,
-                number_atoms            = my_frames_number_atoms,
-                int_output_buffer       = count_buffer,
-                mask_ptr                = mask_removed_vertices_ptr,
-                )
 
         my_neighbours_decr = {}
         for i, frameID in enumerate(my_frames.globalIDs_iter):
@@ -565,12 +606,15 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
 # Checkpoint file handling.
 
 def write_checkpoint(filepath, neighbour_counts, clusters, removed_vertices):
+    logger.debug("Writing %s",filepath)
+    
     checkpoint_objects = (neighbour_counts, clusters, removed_vertices)
 
     with open(filepath, 'wb') as f:
         cPickle.dump(checkpoint_objects, f, protocol=2)
 
 def read_checkpoint(filepath):
+    logger.debug("Reading %s",filepath)
     with open(filepath, 'rb') as f:
         checkpoint_objects = cPickle.load(f)
 
@@ -608,7 +652,9 @@ def cluster_dict_to_text(clusters, centers_filepath, clusters_filepath):
     return None
 
 
-def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
+def assign(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
+    ''' Method to add rest of the data to the cluster centers 
+    '''
     # Initialize MPI.
     comm = MPI.COMM_WORLD
     mpi_size = comm.Get_size()
@@ -651,7 +697,7 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
     
     manager.do_partition()
     # Take work share.
-    my_partition = manager.get_myworkshare()
+    my_partition = manager.myworkshare
 
  
     (my_trajectory_filepaths, my_trajectory_lengths, \
@@ -704,7 +750,7 @@ def refine(Metric, project_filepath, cutoff, centerfile, flag_nopreprocess):
         if my_rank == center_host_node:
             center_frame = my_frames.get_frame(center_id)
         else:
-            shape = (my_frames.number_atoms(), 3)
+            shape = (my_frames.number_atoms, 3)
             center_frame = np.empty(shape, dtype=my_frames.frames.dtype)
         
         comm.Bcast([center_frame, my_frames.mpi_frametype], root=center_host_node)

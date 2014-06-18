@@ -92,6 +92,8 @@ class Framecollection():
             
         except AttributeError:
                 self.global_to_local = None
+        
+            
                          
                   
     def _gen_dict(self):
@@ -291,17 +293,12 @@ class Framecollection():
     @property
     def number_frames(self):
         return self.frames.shape[0]
+
     @property
     def number_atoms(self):
         return self.frames.shape[1]
     
     
-
-#     def get_globalIDs(self):
-#         return list(self.globalIDs)
-# 
-#     def get_localIDs(self):
-#         return dict(self.localIDs)
 
 
 
