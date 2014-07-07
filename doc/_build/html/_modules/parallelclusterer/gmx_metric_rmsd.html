@@ -1,0 +1,267 @@
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>parallelclusterer.gmx_metric_rmsd &mdash; parallelclusterer  documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="top" title="parallelclusterer  documentation" href="../../index.html" />
+    <link rel="up" title="Module code" href="../index.html" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li><a href="../../index.html">parallelclusterer  documentation</a> &raquo;</li>
+          <li><a href="../index.html" accesskey="U">Module code</a> &raquo;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <h1>Source code for parallelclusterer.gmx_metric_rmsd</h1><div class="highlight"><pre>
+<span class="c"># for python 2</span>
+
+<span class="c"># built-in modules</span>
+<span class="kn">import</span> <span class="nn">ctypes</span>
+
+<span class="c"># external modules.</span>
+<span class="kn">import</span> <span class="nn">gp_grompy</span>
+<span class="kn">from</span> <span class="nn">parallelclusterer.gmx_metric</span> <span class="kn">import</span> <span class="n">Gmx_metric</span>
+<span class="kn">from</span> <span class="nn">parallelclusterer</span> <span class="kn">import</span> <span class="n">_gmxrmsd</span> <span class="k">as</span> <span class="n">cmetric</span> 
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="c"># Instantiate helper classes.</span>
+<span class="n">gmstx</span> <span class="o">=</span> <span class="n">gp_grompy</span><span class="o">.</span><span class="n">Gmstx</span><span class="p">()</span>
+<span class="n">gmndx</span> <span class="o">=</span> <span class="n">gp_grompy</span><span class="o">.</span><span class="n">Gmndx</span><span class="p">()</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="n">__name__</span><span class="p">)</span>
+
+
+
+<span class="c"># ================================================================</span>
+
+<div class="viewcode-block" id="Gmx_metric_rmsd"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.gmx_metric_rmsd.Gmx_metric_rmsd">[docs]</a><span class="k">class</span> <span class="nc">Gmx_metric_rmsd</span><span class="p">(</span><span class="n">Gmx_metric</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    A Metric class for clustering.</span>
+<span class="sd">    The metric between frames: least-rmsd allowing for rotation and translation.</span>
+
+<span class="sd">    Metric classes must implement:</span>
+<span class="sd">    - preprocess()</span>
+<span class="sd">    - oneToMany_distance()</span>
+<span class="sd">    - oneToMany_countWithinCutoff() # because it&#39;s faster (and also parallel) in C.</span>
+
+<span class="sd">    Notes:</span>
+<span class="sd">    - Ctypes knows how to do basic conversions, like converting Python floats/ints to C floats/ints.</span>
+<span class="sd">    - I&#39;m not yet thinking about making an interface for Metric classes,</span>
+<span class="sd">      so then I&#39;m creating whatever distance analysis methods I want!</span>
+<span class="sd">      Especially since it&#39;s difficult to do things externally of C functions,</span>
+<span class="sd">      since Python is both slow and single-threaded.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tpr_filepath</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">stx_filepath</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">ndx_filepath</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">number_dimensions</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Obtains all information about the frames that is required to perform the metric computation.</span>
+<span class="sd">        No other information is gathered at a later time.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">Gmx_metric_rmsd</span><span class="p">,</span><span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__init__</span><span class="p">(</span><span class="n">tpr_filepath</span><span class="p">,</span><span class="n">stx_filepath</span><span class="p">,</span><span class="n">ndx_filepath</span><span class="p">,</span><span class="n">number_dimensions</span><span class="p">)</span>
+        
+
+
+    <span class="c"># ================================================================</span>
+    <span class="c"># Methods for computation of the metric.</span>
+
+<div class="viewcode-block" id="Gmx_metric_rmsd.preprocess"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.gmx_metric_rmsd.Gmx_metric_rmsd.preprocess">[docs]</a>    <span class="k">def</span> <span class="nf">preprocess</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame_array_pointer</span><span class="p">,</span> <span class="n">number_frames</span><span class="p">,</span> <span class="n">number_atoms</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Translates a frame&#39;s atoms so that the center of mass is the origin.</span>
+<span class="sd">        (In-place modification.)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">cmetric</span><span class="o">.</span><span class="n">parallelFor_removeCenterOfMass</span><span class="p">(</span> <span class="c"># C function.</span>
+            <span class="n">frame_array_pointer</span><span class="p">,</span> <span class="n">number_frames</span><span class="p">,</span> <span class="n">number_atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fitting_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitting_indices_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitting_weights_ptr</span><span class="p">)</span>
+
+</div>
+<div class="viewcode-block" id="Gmx_metric_rmsd.compute_distances"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.gmx_metric_rmsd.Gmx_metric_rmsd.compute_distances">[docs]</a>    <span class="k">def</span> <span class="nf">compute_distances</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reference_frame_pointer</span><span class="p">,</span> <span class="n">frame_array_pointer</span><span class="p">,</span>
+                            <span class="n">number_frames</span><span class="p">,</span> <span class="n">number_atoms</span><span class="p">,</span> <span class="n">real_output_buffer</span><span class="p">,</span>
+                            <span class="n">mask_ptr</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">mask_dummy_value</span><span class="o">=</span><span class="mf">0.0</span><span class="p">):</span>
+                            <span class="c"># making new arguments have default values to prevent breaking</span>
+                            <span class="c"># but we should eventually properly update all calls to the function</span>
+        
+        <span class="n">real_output_buffer_ptr</span> <span class="o">=</span> <span class="n">real_output_buffer</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">))</span>
+        <span class="n">c_mask_dummy_value</span> <span class="o">=</span> <span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">(</span><span class="n">mask_dummy_value</span><span class="p">)</span>
+
+        <span class="n">cmetric</span><span class="o">.</span><span class="n">oneToMany_computeRmsd</span><span class="p">(</span> <span class="c"># C function.</span>
+            <span class="n">reference_frame_pointer</span><span class="p">,</span> <span class="n">frame_array_pointer</span><span class="p">,</span> <span class="n">number_frames</span><span class="p">,</span> <span class="n">number_atoms</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitting_weights_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_indices_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_weights_ptr</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rms_size</span><span class="p">,</span> <span class="n">real_output_buffer_ptr</span><span class="p">,</span>
+            <span class="n">mask_ptr</span><span class="p">,</span> <span class="n">c_mask_dummy_value</span><span class="p">)</span>
+
+</div>
+<div class="viewcode-block" id="Gmx_metric_rmsd.count_number_neighbours"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.gmx_metric_rmsd.Gmx_metric_rmsd.count_number_neighbours">[docs]</a>    <span class="k">def</span> <span class="nf">count_number_neighbours</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cutoff</span><span class="p">,</span> <span class="n">reference_frame_pointer</span><span class="p">,</span> <span class="n">frame_array_pointer</span><span class="p">,</span> 
+                                <span class="n">number_frames</span><span class="p">,</span> <span class="n">number_atoms</span><span class="p">,</span> <span class="n">int_output_buffer</span><span class="p">,</span>
+                                <span class="n">mask_ptr</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+                                <span class="c"># making new arguments have default values to prevent breaking</span>
+                                <span class="c"># but we should eventually properly update all calls to the function</span>
+
+        <span class="n">cutoff_c</span> <span class="o">=</span> <span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">(</span><span class="n">cutoff</span><span class="p">)</span>
+        <span class="n">int_output_buffer_ptr</span> <span class="o">=</span> <span class="n">int_output_buffer</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">))</span>
+
+        <span class="n">count</span> <span class="o">=</span> <span class="n">cmetric</span><span class="o">.</span><span class="n">oneToMany_countWithinRmsd</span><span class="p">(</span> <span class="c"># C function.</span>
+            <span class="n">cutoff_c</span><span class="p">,</span> <span class="n">int_output_buffer_ptr</span><span class="p">,</span> <span class="n">reference_frame_pointer</span><span class="p">,</span> <span class="n">frame_array_pointer</span><span class="p">,</span>
+            <span class="n">number_frames</span><span class="p">,</span> <span class="n">number_atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitting_weights_ptr</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rms_indices_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_weights_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_size</span><span class="p">,</span>
+            <span class="n">mask_ptr</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">count</span>
+</div>
+<div class="viewcode-block" id="Gmx_metric_rmsd.count_neighbours_between"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.gmx_metric_rmsd.Gmx_metric_rmsd.count_neighbours_between">[docs]</a>    <span class="k">def</span> <span class="nf">count_neighbours_between</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cutoff</span><span class="p">,</span> <span class="n">frame_array0_pointer</span><span class="p">,</span> <span class="n">frame_array1_pointer</span><span class="p">,</span> 
+            <span class="n">frame_array0_number</span><span class="p">,</span> <span class="n">frame_array1_number</span><span class="p">,</span> <span class="n">frame_array0_idx</span><span class="p">,</span>
+            <span class="n">frame_array1_idx</span><span class="p">,</span><span class="n">frame_array0_count</span><span class="p">,</span><span class="n">frame_array1_count</span><span class="p">,</span>
+            <span class="n">frame_array0_idxsize</span><span class="p">,</span><span class="n">frame_array1_idxsize</span><span class="p">,</span> <span class="n">number_atoms</span><span class="p">):</span>
+            <span class="c"># making new arguments have default values to prevent breaking</span>
+            <span class="c"># but we should eventually properly update all calls to the function</span>
+
+        <span class="n">cutoff_c</span> <span class="o">=</span> <span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">(</span><span class="n">cutoff</span><span class="p">)</span>
+        <span class="n">frame_array0_number_c</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">frame_array0_number</span><span class="p">)</span>
+        <span class="n">frame_array1_number_c</span> <span class="o">=</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">frame_array1_number</span><span class="p">)</span>
+        <span class="n">frame_array0_idx_ptr</span> <span class="o">=</span> <span class="n">frame_array0_idx</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">))</span>
+        <span class="n">frame_array1_idx_ptr</span> <span class="o">=</span> <span class="n">frame_array1_idx</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">))</span>
+        <span class="n">frame_array0_count_ptr</span> <span class="o">=</span> <span class="n">frame_array0_count</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">))</span>
+        <span class="n">frame_array1_count_ptr</span> <span class="o">=</span> <span class="n">frame_array1_count</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">))</span>
+        <span class="n">frame_array0_idxsize_c</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">frame_array0_idxsize</span><span class="p">)</span>
+        <span class="n">frame_array1_idxsize_c</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">frame_array1_idxsize</span><span class="p">)</span>
+        <span class="n">number_atoms_c</span>         <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">number_atoms</span><span class="p">)</span>
+        
+        <span class="n">cmetric</span><span class="o">.</span><span class="n">manytomany_between</span><span class="p">(</span>
+            <span class="n">cutoff_c</span><span class="p">,</span> <span class="n">frame_array0_pointer</span><span class="p">,</span> <span class="n">frame_array1_pointer</span><span class="p">,</span> 
+            <span class="n">frame_array0_number_c</span><span class="p">,</span> <span class="n">frame_array1_number_c</span><span class="p">,</span>
+            <span class="n">frame_array0_idx_ptr</span><span class="p">,</span> <span class="n">frame_array1_idx_ptr</span><span class="p">,</span>
+            <span class="n">frame_array0_count_ptr</span><span class="p">,</span> <span class="n">frame_array1_count_ptr</span><span class="p">,</span>
+            <span class="n">frame_array0_idxsize_c</span><span class="p">,</span> <span class="n">frame_array1_idxsize_c</span><span class="p">,</span>
+            <span class="n">number_atoms_c</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions_c</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitting_weights_ptr</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rms_indices_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_weights_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_size</span> <span class="p">)</span>
+
+</div>
+<div class="viewcode-block" id="Gmx_metric_rmsd.count_neighbours_within"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.gmx_metric_rmsd.Gmx_metric_rmsd.count_neighbours_within">[docs]</a>    <span class="k">def</span> <span class="nf">count_neighbours_within</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cutoff</span><span class="p">,</span> <span class="n">frame_array0_pointer</span><span class="p">,</span> 
+            <span class="n">frame_array0_number</span><span class="p">,</span> <span class="n">frame_array0_idx</span><span class="p">,</span><span class="n">frame_array0_count</span><span class="p">,</span>
+            <span class="n">frame_array0_idxsize</span><span class="p">,</span><span class="n">number_atoms</span><span class="p">):</span>
+            <span class="c"># making new arguments have default values to prevent breaking</span>
+            <span class="c"># but we should eventually properly update all calls to the function</span>
+
+        <span class="n">cutoff_c</span> <span class="o">=</span> <span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">(</span><span class="n">cutoff</span><span class="p">)</span>
+        <span class="n">frame_array0_number_c</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">frame_array0_number</span><span class="p">)</span>
+        <span class="n">frame_array0_idx_ptr</span> <span class="o">=</span> <span class="n">frame_array0_idx</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">))</span>
+        <span class="n">frame_array0_count_ptr</span> <span class="o">=</span> <span class="n">frame_array0_count</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">))</span>
+        <span class="n">frame_array0_idxsize_c</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">frame_array0_idxsize</span><span class="p">)</span>
+        <span class="n">number_atoms_c</span>         <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">(</span><span class="n">number_atoms</span><span class="p">)</span>
+        
+        <span class="n">cmetric</span><span class="o">.</span><span class="n">manytomany_within</span><span class="o">.</span><span class="n">argtypes</span> <span class="o">=</span> <span class="p">[</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">),</span>
+                                              <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">,</span>
+                                              <span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">),</span>
+                                              <span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">),</span>
+                                              <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">,</span>
+                                              <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">),</span>
+                                              <span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">),</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">),</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int</span><span class="p">,</span>
+                                              <span class="p">]</span>
+        
+        <span class="n">cmetric</span><span class="o">.</span><span class="n">manytomany_within</span><span class="o">.</span><span class="n">argtypes</span> <span class="o">=</span> <span class="bp">None</span> 
+        
+        
+        <span class="n">res</span> <span class="o">=</span> <span class="n">cmetric</span><span class="o">.</span><span class="n">manytomany_within</span><span class="p">(</span>
+            <span class="n">cutoff_c</span><span class="p">,</span> <span class="n">frame_array0_pointer</span><span class="p">,</span>  
+            <span class="n">frame_array0_number_c</span><span class="p">,</span> 
+            <span class="n">frame_array0_idx_ptr</span><span class="p">,</span> 
+            <span class="n">frame_array0_count_ptr</span><span class="p">,</span> 
+            <span class="n">frame_array0_idxsize_c</span><span class="p">,</span> 
+            <span class="n">number_atoms_c</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions_c</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitting_weights_ptr</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rms_indices_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_weights_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_size</span> <span class="p">)</span>
+
+
+    </div>
+<div class="viewcode-block" id="Gmx_metric_rmsd.fit_trajectory"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.gmx_metric_rmsd.Gmx_metric_rmsd.fit_trajectory">[docs]</a>    <span class="k">def</span> <span class="nf">fit_trajectory</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">traj_container</span><span class="p">,</span><span class="n">ref_frno</span><span class="p">,</span><span class="n">real_output_buffer</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; Function to fit a given frame number to all the frames in a trajectory.</span>
+<span class="sd">            The fitted trajectory is returned.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+         
+        <span class="n">real_output_buffer_ptr</span> <span class="o">=</span> <span class="n">real_output_buffer</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">))</span>
+        <span class="n">frame_array_pointer</span><span class="o">=</span><span class="n">traj_container</span><span class="o">.</span><span class="n">get_first_frame_pointer</span><span class="p">()</span>
+        <span class="n">reference_frame_pointer</span><span class="o">=</span><span class="n">traj_container</span><span class="o">.</span><span class="n">get_frame_pointer</span><span class="p">(</span><span class="n">ref_frno</span><span class="p">)</span>
+        
+        <span class="n">cmetric</span><span class="o">.</span><span class="n">distance_onetomany</span><span class="p">(</span> <span class="c"># C function.</span>
+            <span class="n">reference_frame_pointer</span><span class="p">,</span> <span class="n">frame_array_pointer</span><span class="p">,</span> <span class="n">traj_container</span><span class="o">.</span><span class="n">number_frames</span><span class="p">,</span> 
+            <span class="n">traj_container</span><span class="o">.</span><span class="n">number_atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitting_weights_ptr</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rms_indices_ptr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">rms_weights_ptr</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">rms_size</span><span class="p">,</span> <span class="n">real_output_buffer_ptr</span><span class="p">)</span>
+        
+</pre></div></div></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    <p class="searchtip" style="font-size: 90%">
+    Enter search terms or a module, class or function name.
+    </p>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li><a href="../../index.html">parallelclusterer  documentation</a> &raquo;</li>
+          <li><a href="../index.html" >Module code</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+        &copy; Copyright 2014, Author.
+      Created using <a href="http://sphinx.pocoo.org/">Sphinx</a> 1.1.3.
+    </div>
+  </body>
+</html>

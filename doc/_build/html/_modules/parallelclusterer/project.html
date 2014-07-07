@@ -1,0 +1,369 @@
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>parallelclusterer.project &mdash; parallelclusterer  documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="top" title="parallelclusterer  documentation" href="../../index.html" />
+    <link rel="up" title="Module code" href="../index.html" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li><a href="../../index.html">parallelclusterer  documentation</a> &raquo;</li>
+          <li><a href="../index.html" accesskey="U">Module code</a> &raquo;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <h1>Source code for parallelclusterer.project</h1><div class="highlight"><pre>
+<span class="c"># for python2</span>
+
+<span class="c"># modules</span>
+<span class="kn">import</span> <span class="nn">yaml</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">os</span><span class="o">,</span> <span class="nn">os.path</span>
+
+<span class="c"># other classes</span>
+<span class="kn">import</span> <span class="nn">trajectory_reader</span>
+
+<div class="viewcode-block" id="Project"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project">[docs]</a><span class="k">class</span> <span class="nc">Project</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    TODO: Need to get index groups, somehow.</span>
+
+<span class="sd">This class handles reading and writing of project metadata, including:</span>
+<span class="sd">- The list of trajectories analyzed</span>
+<span class="sd">- The topologies used to generate the trajectories</span>
+<span class="sd">  (this data is sometimes necessary for analysis)</span>
+<span class="sd">- The recording of analysis options which affect the results of analyses</span>
+<span class="sd">  (and so must be recorded for consistency).</span>
+
+<span class="sd">Class Preconditions:</span>
+
+<span class="sd">Class Guarantees:</span>
+<span class="sd">- Objects are always instantiated with all data. (No missing data.)</span>
+
+<span class="sd">Notes:</span>
+<span class="sd">- The class can be instantiated with either an existing project file</span>
+<span class="sd">or by providing the files for a new project.</span>
+<span class="sd">- Project files are recorded on disk as YAML records.</span>
+<span class="sd">- Call only methods having names without leading underscores.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c"># ================================</span>
+    <span class="c"># Methods for instantiation.</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+        <span class="c"># &#39;by existing project&#39; parameters:</span>
+        <span class="n">existing_project_file</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+        <span class="c"># &#39;new&#39; parameters:</span>
+        <span class="n">trajectory_filepaths</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">trajectory_type</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+        <span class="n">gro_filepath</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">ndx_filepath</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">tpr_filepath</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+        <span class="n">number_dimensions</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">stride</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+        <span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        existing_project_file :: String</span>
+<span class="sd">            A path to an existing yaml project record.</span>
+<span class="sd">        trajectory_filepaths :: [String]</span>
+<span class="sd">            A list of paths to trajectories.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c"># --------------------------------</span>
+        <span class="c"># Declare all fields.</span>
+
+        <span class="c"># :: String</span>
+        <span class="c"># A path to the yaml record which stores project metadata.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">project_filepath</span> <span class="o">=</span> <span class="bp">None</span> 
+
+        <span class="c"># :: String</span>
+        <span class="c"># Paths to the gromacs topologies corresponding to the trajectories.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gro_filepath</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ndx_filepath</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tpr_filepath</span> <span class="o">=</span> <span class="bp">None</span>
+
+        <span class="c"># :: String</span>
+        <span class="c"># A lower-case string denoting the type of the trajectories in trajectory_listing.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_type</span> <span class="o">=</span> <span class="bp">None</span>
+
+        <span class="c"># :: [(Integer traj_id, String traj_filepath, Integer traj_length)]</span>
+        <span class="c"># A record of the trajectories analyzed or to be analyzed.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_listing</span> <span class="o">=</span> <span class="bp">None</span>
+
+        <span class="c"># :: Integer</span>
+        <span class="c"># For analyzing the trajectories sparsely:</span>
+        <span class="c"># use only frames such that (frame_number mod frame_stride = 0), for indexing starting at 0.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frame_stride</span> <span class="o">=</span> <span class="bp">None</span>
+
+        <span class="c"># :: Integer</span>
+        <span class="c"># The spatial dimensionality of the data.</span>
+        <span class="c"># (Usually 3, but one may wish to consider the projection of the data onto a plane, for example.)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stride</span> <span class="o">=</span> <span class="bp">None</span>
+
+        <span class="c"># The number of trajectories can be obtained with &quot;len(trajectory_listing)&quot;.</span>
+
+        <span class="c"># How to specify maximum number of processes (for multiprocessing)?</span>
+        <span class="c"># It&#39;s more of a runtime setting rather than a project setting.</span>
+
+        <span class="c"># --------------------------------</span>
+        <span class="c"># Choose instantiator.</span>
+
+        <span class="c"># new:</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="p">(</span><span class="n">trajectory_filepaths</span><span class="p">,</span> <span class="n">gro_filepath</span><span class="p">,</span> <span class="n">ndx_filepath</span><span class="p">,</span>
+                <span class="n">tpr_filepath</span><span class="p">,</span> <span class="n">trajectory_type</span><span class="p">,</span> <span class="n">number_dimensions</span><span class="p">,</span> <span class="n">stride</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">all_not_none</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_init_new</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+
+        <span class="c"># from exiting project:</span>
+        <span class="k">elif</span> <span class="n">existing_project_file</span> <span class="o">!=</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_init_by_existing_project</span><span class="p">(</span><span class="n">existing_project_file</span><span class="p">)</span>
+
+        <span class="c"># no match:</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s">&quot;Parameters are not sufficient for loading an existing project nor creating a new project.&quot;</span><span class="p">)</span>
+
+
+
+    <span class="k">def</span> <span class="nf">_init_by_existing_project</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">existing_project_file</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        existing_project_file :: String</span>
+<span class="sd">            A path to an existing yaml project record.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="c"># Check for existence of file.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">existing_project_file</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">IOError</span><span class="p">(</span><span class="s">&quot;Project file &#39;{0}&#39; does not exist.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">existing_project_file</span><span class="p">))</span>
+            
+        <span class="c"># Record project file.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">project_filepath</span> <span class="o">=</span> <span class="n">existing_project_file</span>
+
+        <span class="c"># Load records.</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">project_filepath</span><span class="p">,</span> <span class="s">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file_handle</span><span class="p">:</span>
+            <span class="n">record</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">file_handle</span><span class="p">)</span>
+
+            <span class="c"># Read topologies.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">gro_filepath</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;gro_filepath&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ndx_filepath</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;ndx_filepath&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tpr_filepath</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;tpr_filepath&#39;</span><span class="p">]</span>
+
+            <span class="c"># Read trajectory type.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_type</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;trajectory_type&#39;</span><span class="p">]</span>
+
+            <span class="c"># Read trajectory listing.</span>
+            <span class="n">trajectory_listing</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">trajectory_list</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;trajectory_listing&#39;</span><span class="p">]</span>
+
+            <span class="c"># trajectory_list :: [Dictionary]</span>
+            <span class="k">for</span> <span class="n">traj</span> <span class="ow">in</span> <span class="n">trajectory_list</span><span class="p">:</span>
+                <span class="n">traj_id</span> <span class="o">=</span> <span class="n">traj</span><span class="p">[</span><span class="s">&#39;id&#39;</span><span class="p">]</span>
+                <span class="n">traj_filepath</span> <span class="o">=</span> <span class="n">traj</span><span class="p">[</span><span class="s">&#39;filepath&#39;</span><span class="p">]</span>
+                <span class="n">traj_length</span> <span class="o">=</span> <span class="n">traj</span><span class="p">[</span><span class="s">&#39;length&#39;</span><span class="p">]</span>
+                <span class="n">trajectory_listing</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">traj_id</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span><span class="p">))</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_listing</span> <span class="o">=</span> <span class="n">trajectory_listing</span>
+
+            <span class="c"># Read number of dimensions.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;number_dimensions&#39;</span><span class="p">]</span> 
+            <span class="bp">self</span><span class="o">.</span><span class="n">stride</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;stride&#39;</span><span class="p">]</span>
+
+
+
+    <span class="k">def</span> <span class="nf">_init_new</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">trajectory_filepaths</span><span class="p">,</span> <span class="n">gro_filepath</span><span class="p">,</span> <span class="n">ndx_filepath</span><span class="p">,</span>
+                    <span class="n">tpr_filepath</span><span class="p">,</span> <span class="n">trajectory_type</span><span class="p">,</span> <span class="n">number_dimensions</span><span class="p">,</span> <span class="n">stride</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        trajectory_filepaths :: [String]</span>
+<span class="sd">            A list of paths to trajectory files to be analyzed.</span>
+<span class="sd">        gro_filepath, ndx_filepath, tpr_filepath :: String</span>
+<span class="sd">            Paths to Gromacs topology files.</span>
+<span class="sd">        trajectory_type :: String</span>
+<span class="sd">            A lower-case string denoting the trajectory file type (e.g. &#39;xtc&#39;).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c"># Set topologies.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gro_filepath</span> <span class="o">=</span> <span class="n">gro_filepath</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ndx_filepath</span> <span class="o">=</span> <span class="n">ndx_filepath</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tpr_filepath</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_tpr_filepath</span><span class="p">()</span>
+
+        <span class="c"># Set trajectory type.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_type</span> <span class="o">=</span> <span class="n">trajectory_type</span>
+
+        <span class="c"># Set trajectory listing.</span>
+        <span class="n">trajectory_listing</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">traj_id</span><span class="p">,</span> <span class="n">traj_filepath</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">trajectory_filepaths</span><span class="p">):</span>
+            <span class="k">print</span> <span class="s">&quot;Reading length of trajectory {0}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">traj_filepath</span><span class="p">)</span>
+            <span class="n">traj_length</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_trajectory_length</span><span class="p">(</span><span class="n">trajectory_type</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">)</span>
+
+            <span class="n">trajectory_listing</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">traj_id</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span><span class="p">))</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_listing</span> <span class="o">=</span> <span class="n">trajectory_listing</span>
+
+        <span class="c"># Set number dimensions.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span> <span class="o">=</span> <span class="n">number_dimensions</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stride</span> <span class="o">=</span> <span class="n">stride</span>
+
+
+    <span class="c"># doesn&#39;t need to be an object method</span>
+    <span class="k">def</span> <span class="nf">_get_trajectory_length</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">trajectory_type</span><span class="p">,</span> <span class="n">trajectory_filepath</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        trajectory_type :: String</span>
+<span class="sd">            A lower-case string denoting the trajectory file type (e.g. &#39;xtc&#39;).</span>
+<span class="sd">        trajectory_filepath :: String</span>
+<span class="sd">            A path to a trajectory.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">trajectory_reader</span><span class="o">.</span><span class="n">read_frameLength</span><span class="p">(</span><span class="n">trajectory_type</span><span class="p">,</span> <span class="n">trajectory_filepath</span><span class="p">)</span>
+
+
+
+    <span class="c"># ================================</span>
+    <span class="c"># Methods for writing to disk as a yaml record.</span>
+
+<div class="viewcode-block" id="Project.write_project"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.write_project">[docs]</a>    <span class="k">def</span> <span class="nf">write_project</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">path</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">project_filepath</span>
+
+        <span class="c"># Check if a file exists at the path.</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">IOError</span><span class="p">,</span> <span class="s">&quot;File already exists; refusing to overwrite.&quot;</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">file_handle</span><span class="p">:</span>
+            <span class="n">record</span> <span class="o">=</span> <span class="p">{}</span>
+            
+            <span class="c"># Write topologies.</span>
+            <span class="n">record</span><span class="p">[</span><span class="s">&#39;gro_filepath&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gro_filepath</span>
+            <span class="n">record</span><span class="p">[</span><span class="s">&#39;ndx_filepath&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ndx_filepath</span>
+            <span class="n">record</span><span class="p">[</span><span class="s">&#39;tpr_filepath&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tpr_filepath</span>
+
+            <span class="c"># Write trajectory type.</span>
+            <span class="n">record</span><span class="p">[</span><span class="s">&#39;trajectory_type&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_type</span>
+
+            <span class="c"># Write trajectory listing.</span>
+            <span class="n">trajectory_list</span> <span class="o">=</span> <span class="n">record</span><span class="p">[</span><span class="s">&#39;trajectory_listing&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+            <span class="k">for</span> <span class="n">traj_id</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_listing</span><span class="p">:</span>
+                <span class="n">traj</span> <span class="o">=</span> <span class="p">{}</span>
+
+                <span class="n">traj</span><span class="p">[</span><span class="s">&#39;id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">traj_id</span>
+                <span class="n">traj</span><span class="p">[</span><span class="s">&#39;filepath&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">traj_filepath</span>
+                <span class="n">traj</span><span class="p">[</span><span class="s">&#39;length&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">traj_length</span>
+
+                <span class="n">trajectory_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">traj</span><span class="p">)</span>
+
+            <span class="c"># Write number of dimensions.</span>
+            <span class="n">record</span><span class="p">[</span><span class="s">&#39;number_dimensions&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span>
+            <span class="n">record</span><span class="p">[</span><span class="s">&#39;stride&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">stride</span>
+
+            <span class="n">yaml</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">file_handle</span><span class="p">)</span>
+
+        
+    <span class="c"># ================================</span>
+    <span class="c"># Accessor Methods.</span>
+
+    <span class="c"># Notes:</span>
+    <span class="c"># - self.trajectory_listing :: [(Integer traj_id, String traj_filepath, Integer traj_length)]</span>
+</div>
+<div class="viewcode-block" id="Project.get_trajectory_lengths"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_trajectory_lengths">[docs]</a>    <span class="k">def</span> <span class="nf">get_trajectory_lengths</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span> <span class="n">traj_length</span> <span class="k">for</span> <span class="p">(</span><span class="n">traj_id</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span><span class="p">)</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_listing</span> <span class="p">]</span>
+</div>
+<div class="viewcode-block" id="Project.get_trajectory_filepaths"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_trajectory_filepaths">[docs]</a>    <span class="k">def</span> <span class="nf">get_trajectory_filepaths</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span> <span class="n">traj_filepath</span> <span class="k">for</span> <span class="p">(</span><span class="n">traj_id</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span><span class="p">)</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_listing</span> <span class="p">]</span>
+</div>
+<div class="viewcode-block" id="Project.get_trajectory_ids"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_trajectory_ids">[docs]</a>    <span class="k">def</span> <span class="nf">get_trajectory_ids</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span> <span class="n">traj_id</span> <span class="k">for</span> <span class="p">(</span><span class="n">traj_id</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span><span class="p">)</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_listing</span> <span class="p">]</span>
+</div>
+<div class="viewcode-block" id="Project.get_trajectory_type"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_trajectory_type">[docs]</a>    <span class="k">def</span> <span class="nf">get_trajectory_type</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">trajectory_type</span>
+        </div>
+<div class="viewcode-block" id="Project.get_gro_filepath"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_gro_filepath">[docs]</a>    <span class="k">def</span> <span class="nf">get_gro_filepath</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">gro_filepath</span></div>
+<div class="viewcode-block" id="Project.get_ndx_filepath"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_ndx_filepath">[docs]</a>    <span class="k">def</span> <span class="nf">get_ndx_filepath</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">ndx_filepath</span>
+    </div>
+<div class="viewcode-block" id="Project.get_tpr_filepath"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_tpr_filepath">[docs]</a>    <span class="k">def</span> <span class="nf">get_tpr_filepath</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">tpr_filepath</span> <span class="o">==</span> <span class="s">&quot;None&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">None</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">tpr_filepath</span>
+</div>
+<div class="viewcode-block" id="Project.get_number_dimensions"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_number_dimensions">[docs]</a>    <span class="k">def</span> <span class="nf">get_number_dimensions</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">number_dimensions</span></div>
+<div class="viewcode-block" id="Project.get_stride"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.Project.get_stride">[docs]</a>    <span class="k">def</span> <span class="nf">get_stride</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stride</span>
+
+<span class="c"># helper functions</span></div></div>
+<div class="viewcode-block" id="all_not_none"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.project.all_not_none">[docs]</a><span class="k">def</span> <span class="nf">all_not_none</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="k">return</span> <span class="nb">all</span><span class="p">(</span> <span class="n">x</span> <span class="o">!=</span> <span class="bp">None</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">args</span><span class="p">)</span>
+</pre></div></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    <p class="searchtip" style="font-size: 90%">
+    Enter search terms or a module, class or function name.
+    </p>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li><a href="../../index.html">parallelclusterer  documentation</a> &raquo;</li>
+          <li><a href="../index.html" >Module code</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+        &copy; Copyright 2014, Author.
+      Created using <a href="http://sphinx.pocoo.org/">Sphinx</a> 1.1.3.
+    </div>
+  </body>
+</html>

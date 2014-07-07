@@ -1,0 +1,431 @@
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>parallelclusterer.framecollection &mdash; parallelclusterer  documentation</title>
+    
+    <link rel="stylesheet" href="../../_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../../',
+        VERSION:     '',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="top" title="parallelclusterer  documentation" href="../../index.html" />
+    <link rel="up" title="Module code" href="../index.html" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li><a href="../../index.html">parallelclusterer  documentation</a> &raquo;</li>
+          <li><a href="../index.html" accesskey="U">Module code</a> &raquo;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <h1>Source code for parallelclusterer.framecollection</h1><div class="highlight"><pre>
+<span class="c"># for python2</span>
+<span class="c">#####</span>
+<span class="c"># This is a rewrite of original container class written by Alex.</span>
+<span class="c"># The idea behind this class is to serve as a data container for multiple trajectories   </span>
+<span class="c"># and implement methods that aid in processing of multiple trajectories in parallel using mpi4py</span>
+<span class="c">#  </span>
+<span class="c">#</span>
+<span class="c">####</span>
+<span class="c"># Built-in modules</span>
+<span class="kn">import</span> <span class="nn">ctypes</span>
+<span class="kn">from</span> <span class="nn">itertools</span> <span class="kn">import</span> <span class="n">chain</span><span class="p">,</span> <span class="n">izip</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="c"># External modules</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">mpi4py</span> <span class="kn">import</span> <span class="n">MPI</span> 
+<span class="kn">import</span> <span class="nn">gp_grompy</span>
+<span class="c"># Package classes</span>
+<span class="kn">import</span> <span class="nn">trajectory_reader</span>
+
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="n">__name__</span><span class="p">)</span>
+<span class="c"># Type declarations.</span>
+<span class="c"># Need to match size of Gromacs&#39; c_real. Which for now is 32-bit.</span>
+<span class="n">NumpyFloat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span>
+<span class="n">CtypesFloat</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_float</span>
+<span class="n">CtypesFloatPtr</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_float</span><span class="p">)</span>
+<span class="n">MPIFloat32</span> <span class="o">=</span> <span class="n">MPI</span><span class="o">.</span><span class="n">FLOAT</span>
+<span class="n">MPIInt32</span> <span class="o">=</span> <span class="n">MPI</span><span class="o">.</span><span class="n">INT</span>
+<span class="n">MPIByte</span> <span class="o">=</span> <span class="n">MPI</span><span class="o">.</span><span class="n">CHAR</span>
+<span class="n">MAXTAGS</span> <span class="o">=</span> <span class="mi">10</span>
+
+<div class="viewcode-block" id="Framecollection"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection">[docs]</a><span class="k">class</span> <span class="nc">Framecollection</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    A class to facilitate handling of strided trajectory data in parallel.</span>
+
+<span class="sd">    - Allows indexing frames by a globalID.</span>
+<span class="sd">    - Methods for sending data over mpi4py.</span>
+
+<span class="sd">    .. Note:: No error checking in arguments implemented yet</span>
+<span class="sd">    </span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    globalIDs: array_like (int32)</span>
+<span class="sd">         global number of the frame</span>
+<span class="sd">    localID: array_like (int32)</span>
+<span class="sd">        local number of the frame</span>
+<span class="sd">    frames: array_like (float32)</span>
+<span class="sd">        concatenated trajectory frames</span>
+<span class="sd">    traj_filepath: list  </span>
+<span class="sd">        filepath of trajs in this collections,in sequence</span>
+<span class="sd">    traj_lengths: array_like (int32)</span>
+<span class="sd">        number of frames in each trajectory that are part of this collection, in sequence</span>
+<span class="sd">    mask: boolean_array ( 8 bit?)</span>
+<span class="sd">        false by default</span>
+<span class="sd">    </span>
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    globalIDs: array_like</span>
+<span class="sd">    localIDs: array_like</span>
+<span class="sd">    frames:  array_like</span>
+<span class="sd">    mask:  array_like</span>
+<span class="sd">    traj_filepaths:</span>
+<span class="sd">    traj_lenghts:</span>
+<span class="sd">    tags:</span>
+<span class="sd">    mpi_frametype: </span>
+<span class="sd">    </span>
+<span class="sd">    </span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">globalIDs</span> <span class="o">=</span> <span class="bp">None</span><span class="p">,</span> <span class="n">localIDs</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">frames</span> <span class="o">=</span> <span class="bp">None</span><span class="p">,</span> <span class="n">mask</span> <span class="o">=</span> <span class="bp">None</span><span class="p">,</span>
+                  <span class="n">traj_filepaths</span> <span class="o">=</span> <span class="bp">None</span><span class="p">,</span> <span class="n">traj_lenghts</span> <span class="o">=</span> <span class="bp">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        </span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span> <span class="o">=</span> <span class="n">globalIDs</span> <span class="c">#</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">localIDs</span>  <span class="o">=</span> <span class="n">localIDs</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">frames</span> <span class="o">=</span> <span class="n">frames</span> 
+        <span class="bp">self</span><span class="o">.</span><span class="n">mask</span> <span class="o">=</span> <span class="n">mask</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">traj_filepaths</span> <span class="o">=</span> <span class="n">traj_filepaths</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">traj_lenghts</span> <span class="o">=</span> <span class="n">traj_lenghts</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tags</span><span class="o">=</span><span class="p">[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">MAXTAGS</span><span class="p">)]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mpi_frametype</span> <span class="o">=</span> <span class="n">MPIFloat32</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">globalIDs</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="n">localIDs</span><span class="o">.</span><span class="n">size</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">global_to_local</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gen_dict</span><span class="p">()</span>
+                  
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="s">&quot;number of globalIDs and localIDs are different ..exiting&quot;</span><span class="p">)</span>
+            
+        <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">global_to_local</span> <span class="o">=</span> <span class="bp">None</span>
+        
+            
+                         
+                  
+    <span class="k">def</span> <span class="nf">_gen_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; return dict with globalIDs as keys and localIDs as values</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        
+        <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span><span class="p">,</span><span class="bp">self</span><span class="o">.</span><span class="n">localIDs</span><span class="p">))</span>
+        
+
+    <span class="nd">@classmethod</span>
+<div class="viewcode-block" id="Framecollection.from_files"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.from_files">[docs]</a>    <span class="k">def</span> <span class="nf">from_files</span><span class="p">(</span><span class="n">cls</span><span class="p">,</span> <span class="n">stride</span><span class="p">,</span> <span class="n">trajectory_type</span><span class="p">,</span>
+                    <span class="n">trajectory_globalID_offsets</span><span class="p">,</span> <span class="n">trajectory_filepath_list</span><span class="p">,</span> <span class="n">trajectory_length_list</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Instantiate by providing a list of paths to trajectory files,</span>
+<span class="sd">        a list of the lengths of those trajectories,</span>
+<span class="sd">        and a list of their globalID offsets (the desired globalID of the first frame of the trajectory)</span>
+<span class="sd">        and other metadata (stride, trajectory type).</span>
+
+<span class="sd">        A trajectory reader will be used to load the trajectories,</span>
+<span class="sd">        loading only every n&#39;th frame, where n = stride, starting with the first.</span>
+
+<span class="sd">        Each loaded frame will be labelled with a globalID.</span>
+<span class="sd">        </span>
+<span class="sd">        Parameters</span>
+<span class="sd">        ----------</span>
+<span class="sd">        stride                      : Integer</span>
+<span class="sd">        trajectory_type             : String</span>
+<span class="sd">        trajectory_globalID_offsets : [Integer]</span>
+<span class="sd">        trajectory_filepath_list    : [String]</span>
+<span class="sd">        trajectory_length_list      : [Integer]</span>
+<span class="sd">        </span>
+<span class="sd">        Returns</span>
+<span class="sd">        -------</span>
+<span class="sd">            framecollection object</span>
+
+<span class="sd">        </span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">new</span> <span class="o">=</span> <span class="n">cls</span><span class="p">()</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">globalIDs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">chain</span><span class="p">(</span> <span class="o">*</span><span class="p">(</span>  <span class="nb">xrange</span><span class="p">(</span><span class="n">offset</span><span class="p">,</span> <span class="n">length</span><span class="o">+</span><span class="n">offset</span><span class="p">,</span> <span class="n">stride</span><span class="p">)</span> 
+                                        <span class="k">for</span> <span class="n">offset</span><span class="p">,</span> <span class="n">length</span>
+                                        <span class="ow">in</span> <span class="n">izip</span><span class="p">(</span><span class="n">trajectory_globalID_offsets</span><span class="p">,</span> <span class="n">trajectory_length_list</span><span class="p">)</span> 
+                                    <span class="p">))),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+
+        <span class="n">new</span><span class="o">.</span><span class="n">localIDs</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">new</span><span class="o">.</span><span class="n">globalIDs</span><span class="o">.</span><span class="n">size</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">mask</span>      <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">new</span><span class="o">.</span><span class="n">globalIDs</span><span class="o">.</span><span class="n">size</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        
+        <span class="n">trajectory_coordinate_arrays</span> <span class="o">=</span> <span class="p">[</span>
+             <span class="n">trajectory_reader</span><span class="o">.</span><span class="n">read_coordinates</span><span class="p">(</span><span class="n">trajectory_type</span><span class="p">,</span> <span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span><span class="p">,</span> <span class="n">stride</span><span class="p">)</span> <span class="k">for</span> 
+             <span class="p">(</span><span class="n">traj_filepath</span><span class="p">,</span> <span class="n">traj_length</span><span class="p">)</span> <span class="ow">in</span> <span class="n">izip</span><span class="p">(</span><span class="n">trajectory_filepath_list</span><span class="p">,</span> <span class="n">trajectory_length_list</span><span class="p">)</span>  <span class="p">]</span>
+         
+        <span class="n">new</span><span class="o">.</span><span class="n">frames</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">trajectory_coordinate_arrays</span><span class="p">)</span> <span class="c"># np.concatenate vs np.vstack?</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">new</span><span class="o">.</span><span class="n">globalIDs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="n">new</span><span class="o">.</span><span class="n">number_frames</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s">&quot; Number of Frame Expected [</span><span class="si">%d</span><span class="s">] and number of frame read [</span><span class="si">%d</span><span class="s">] do not match&quot;</span><span class="p">,</span>
+                                                                        <span class="n">new</span><span class="o">.</span><span class="n">globalIDs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="n">new</span><span class="o">.</span><span class="n">number_frames</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="s">&quot;Exiting..&quot;</span><span class="p">)</span>
+        
+        <span class="n">new</span><span class="o">.</span><span class="n">traj_filepaths</span> <span class="o">=</span> <span class="n">trajectory_filepath_list</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">traj_lengths</span>   <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">trajectory_length_list</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">global_to_local</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_gen_dict</span><span class="p">()</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;traj_lengths </span><span class="si">%s</span><span class="s">: globaIDs shape </span><span class="si">%s</span><span class="s"> frames shape </span><span class="si">%s</span><span class="s">&quot;</span><span class="p">,</span>
+                     <span class="n">new</span><span class="o">.</span><span class="n">traj_lengths</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">new</span><span class="o">.</span><span class="n">globalIDs</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="n">new</span><span class="o">.</span><span class="n">frames</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">new</span>
+
+
+
+    <span class="c"># ================================================================</span>
+    <span class="c"># Copy/Slicing Stuff</span>
+</div>
+<div class="viewcode-block" id="Framecollection.copy"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.copy">[docs]</a>    <span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        performs a deepcopy like operation. </span>
+<span class="sd">            </span>
+<span class="sd">        &#39;&#39;&#39;</span>
+
+        <span class="n">new</span> <span class="o">=</span> <span class="n">Framecollection</span><span class="p">()</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">globalIDs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">localIDs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">localIDs</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">frames</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">mask</span>   <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mask</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">traj_filepaths</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traj_filepaths</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">traj_lengths</span> <span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traj_lengths</span><span class="p">)</span>
+        <span class="n">new</span><span class="o">.</span><span class="n">global_to_local</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_gen_dict</span><span class="p">()</span>
+        
+        <span class="k">return</span> <span class="n">new</span>
+
+
+
+    <span class="c"># ================================================================</span>
+    <span class="c"># MPI Methods: To facilitate sending containers over mpi4py.</span>
+    <span class="c">#&quot;&quot;&quot;</span>
+    <span class="c">#Split the container into its array and the rest of its data (the metadata),</span>
+    <span class="c">#in order to send the array as a buffer (bypassing pickling).</span>
+    <span class="c">#&quot;&quot;&quot;</span></div>
+<div class="viewcode-block" id="Framecollection.send_to_remote"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.send_to_remote">[docs]</a>    <span class="k">def</span> <span class="nf">send_to_remote</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">comm</span><span class="p">,</span> <span class="n">dest_rank</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; To transmit all the object&#39;s information</span>
+<span class="sd">        </span>
+<span class="sd">            Parameters</span>
+<span class="sd">            -------------</span>
+<span class="sd">            comm: object of Comm class from mpi4py</span>
+<span class="sd">            dest_rank: rank of the node to send to</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">tag</span><span class="o">=</span><span class="mi">0</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">send</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span><span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span>
+                   <span class="bp">self</span><span class="o">.</span><span class="n">traj_lengths</span><span class="o">.</span><span class="n">shape</span><span class="p">],</span><span class="n">dest</span><span class="o">=</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Send</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">,</span> <span class="n">MPIFloat32</span><span class="p">],</span> <span class="n">dest</span><span class="o">=</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Send</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span><span class="p">,</span> <span class="n">MPIInt32</span><span class="p">],</span> <span class="n">dest</span><span class="o">=</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Send</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">localIDs</span><span class="p">,</span> <span class="n">MPIInt32</span><span class="p">],</span> <span class="n">dest</span><span class="o">=</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Send</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">mask</span><span class="p">,</span> <span class="n">MPIByte</span><span class="p">],</span> <span class="n">dest</span><span class="o">=</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Send</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">traj_lengths</span><span class="p">,</span><span class="n">MPIInt32</span><span class="p">],</span><span class="n">dest</span><span class="o">=</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">traj_filepaths</span><span class="p">,</span><span class="n">dest</span><span class="o">=</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;sent to destination </span><span class="si">%s</span><span class="s"> tag </span><span class="si">%s</span><span class="s">&quot;</span><span class="p">,</span><span class="n">dest_rank</span><span class="p">,</span><span class="n">tag</span><span class="p">)</span>
+</div>
+<div class="viewcode-block" id="Framecollection.for_sending"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.for_sending">[docs]</a>    <span class="k">def</span> <span class="nf">for_sending</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">comm</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; returns lambda which needs only rank of the process to send data to</span>
+<span class="sd">        </span>
+<span class="sd">            Parameters</span>
+<span class="sd">            ------------</span>
+<span class="sd">            comm: object of Comm class from mpi4py</span>
+<span class="sd">            </span>
+<span class="sd">            </span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="k">lambda</span> <span class="n">dest_rank</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">send_to_remote</span><span class="p">(</span><span class="n">comm</span><span class="p">,</span> <span class="n">dest_rank</span><span class="p">)</span>
+
+</div>
+<div class="viewcode-block" id="Framecollection.receive_from_remote"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.receive_from_remote">[docs]</a>    <span class="k">def</span> <span class="nf">receive_from_remote</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">comm</span><span class="p">,</span> <span class="n">send_rank</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; To recieve all the object&#39;s information</span>
+<span class="sd">        </span>
+<span class="sd">            Parameters</span>
+<span class="sd">            --------------</span>
+<span class="sd">            comm: object of Comm class from mpi4py</span>
+<span class="sd">            send_rank: rank of the node to recieve from</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">tag</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="c"># need to get frame shape before we can receive</span>
+        <span class="n">frame_shape</span><span class="p">,</span><span class="n">ID_shape</span><span class="p">,</span><span class="n">trajlen_shape</span> <span class="o">=</span> <span class="n">comm</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">frames</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">frame_shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">NumpyFloat</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">ID_shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">localIDs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">ID_shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">ID_shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">traj_lengths</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">trajlen_shape</span><span class="p">,</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+        
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Recv</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">,</span> <span class="n">MPIFloat32</span><span class="p">],</span> <span class="n">source</span><span class="o">=</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Recv</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span><span class="p">,</span> <span class="n">MPIInt32</span><span class="p">],</span> <span class="n">source</span><span class="o">=</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Recv</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">localIDs</span><span class="p">,</span> <span class="n">MPIInt32</span><span class="p">],</span> <span class="n">source</span><span class="o">=</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Recv</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">mask</span><span class="p">,</span> <span class="n">MPIByte</span><span class="p">],</span> <span class="n">source</span><span class="o">=</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">comm</span><span class="o">.</span><span class="n">Recv</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">traj_lengths</span><span class="p">,</span> <span class="n">MPIInt32</span><span class="p">],</span> <span class="n">source</span><span class="o">=</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        <span class="n">tag</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">traj_filepaths</span> <span class="o">=</span> <span class="n">comm</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
+        
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Received from source </span><span class="si">%s</span><span class="s"> tag </span><span class="si">%s</span><span class="s">&quot;</span><span class="p">,</span><span class="n">send_rank</span><span class="p">,</span><span class="n">tag</span><span class="p">)</span>
+        
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="o">.</span><span class="n">flags</span><span class="p">[</span><span class="s">&quot;C_CONTIGUOUS&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="bp">False</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s">&quot;non contiguous array.. remaking it&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">frames</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">NumpyFloat</span><span class="p">)</span>
+        
+        <span class="bp">self</span><span class="o">.</span><span class="n">global_to_local</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gen_dict</span><span class="p">()</span>
+    </div>
+<div class="viewcode-block" id="Framecollection.for_receiving"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.for_receiving">[docs]</a>    <span class="k">def</span> <span class="nf">for_receiving</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">comm</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot; returns lambda which needs only rank of the process to receive data from</span>
+<span class="sd">            </span>
+<span class="sd">            Parameters</span>
+<span class="sd">            --------------</span>
+<span class="sd">            comm: object of Comm class from mpi4py</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        
+        <span class="k">return</span> <span class="k">lambda</span> <span class="n">send_rank</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">receive_from_remote</span><span class="p">(</span><span class="n">comm</span><span class="p">,</span> <span class="n">send_rank</span><span class="p">)</span>
+        
+    <span class="c"># ================================================================</span>
+    <span class="c"># Array indexing methods.</span>
+</div>
+<div class="viewcode-block" id="Framecollection.get_frame"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.get_frame">[docs]</a>    <span class="k">def</span> <span class="nf">get_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">globalID</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; return frame for a given globalID</span>
+<span class="sd">        </span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">localID</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">global_to_local</span><span class="p">[</span><span class="n">globalID</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span><span class="s">&quot;Frame with globalID &#39;{0}&#39; not found in container.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">globalID</span><span class="p">))</span>
+            
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="n">localID</span><span class="p">]</span>
+
+</div>
+<div class="viewcode-block" id="Framecollection.get_frame_pointer"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.get_frame_pointer">[docs]</a>    <span class="k">def</span> <span class="nf">get_frame_pointer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">globalID</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; return pointer that points to frame at given globalID</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">localID</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">global_to_local</span><span class="p">[</span><span class="n">globalID</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span><span class="s">&quot;Frame with globalID &#39;{0}&#39; not found in container.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">globalID</span><span class="p">))</span>
+            
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="n">localID</span><span class="p">:]</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">))</span>
+
+</div>
+<div class="viewcode-block" id="Framecollection.get_first_frame_pointer"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.get_first_frame_pointer">[docs]</a>    <span class="k">def</span> <span class="nf">get_first_frame_pointer</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; return pointer that points to the first frame</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">ptr</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="mi">0</span><span class="p">:]</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data_as</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">POINTER</span><span class="p">(</span><span class="n">gp_grompy</span><span class="o">.</span><span class="n">c_real</span><span class="p">))</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span><span class="s">&quot;The container holds no frames.&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">ptr</span>
+
+
+    <span class="c"># ================================================================</span>
+    <span class="c"># Metadata accessor methods.</span></div>
+    <span class="nd">@property</span>
+<div class="viewcode-block" id="Framecollection.globalIDs_iter"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.globalIDs_iter">[docs]</a>    <span class="k">def</span> <span class="nf">globalIDs_iter</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; return global id iterator</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="k">return</span> <span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">globalIDs</span><span class="p">)</span>
+    </div>
+    <span class="nd">@property</span>
+<div class="viewcode-block" id="Framecollection.number_frames"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.number_frames">[docs]</a>    <span class="k">def</span> <span class="nf">number_frames</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; return total number of frames</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+</div>
+    <span class="nd">@property</span>
+<div class="viewcode-block" id="Framecollection.number_atoms"><a class="viewcode-back" href="../../parallelclusterer.html#parallelclusterer.framecollection.Framecollection.number_atoms">[docs]</a>    <span class="k">def</span> <span class="nf">number_atoms</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&#39;&#39;&#39; return number of atoms in a frame</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+    
+    
+</pre></div></div></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+<div id="searchbox" style="display: none">
+  <h3>Quick search</h3>
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    <p class="searchtip" style="font-size: 90%">
+    Enter search terms or a module, class or function name.
+    </p>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li><a href="../../index.html">parallelclusterer  documentation</a> &raquo;</li>
+          <li><a href="../index.html" >Module code</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+        &copy; Copyright 2014, Author.
+      Created using <a href="http://sphinx.pocoo.org/">Sphinx</a> 1.1.3.
+    </div>
+  </body>
+</html>
