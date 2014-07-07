@@ -25,10 +25,20 @@ yes | pip uninstall parallelclusterer
 rm -rf build dist parallelclusterer.egg-info $install_dir 
 }
 
-
+function inst {
 clean
 #python setup.py clean
 #python setup.py sdist
 python setup.py build_ext --include-dirs $incdir   --library-dirs $libdir
 #python setup.py install --prefix $install_dir
 python setup.py install 
+}
+
+function doc {
+
+sphinx-apidoc /home/gurpreet/sft/python/env1/local/lib/python2.7/site-packages/parallelclusterer -o doc --full
+
+
+}
+inst
+#doc

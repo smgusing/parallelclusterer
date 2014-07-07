@@ -31,49 +31,56 @@ MAXTAGS = 10
 
 class Framecollection():
     """
-    A class to facilitate handling of strided trajectory data.
-    For distributed programs (using mpi4py).
+    A class to facilitate handling of strided trajectory data in parallel.
 
-    Features:
     - Allows indexing frames by a globalID.
-    - Methods for sending over mpi4py (can be used with parallel.py).
+    - Methods for sending data over mpi4py.
 
-    GlobalID Conversion:
-    - Is generated from only the stride length and the trajectory lengths.
-    - The globalID/localID conversion is implemented by a mapping and may therefore be arbitrary.
-    - This is done for simplicity/flexibility but at the cost of efficiency
-      (mostly that it takes up more memory than computing it).
+    .. Note:: No error checking in arguments implemented yet
+    
+    Parameters
+    ----------
+    globalIDs: array_like (int32)
+         global number of the frame
+    localID: array_like (int32)
+        local number of the frame
+    frames: array_like (float32)
+        concatenated trajectory frames
+    traj_filepath: list  
+        filepath of trajs in this collections,in sequence
+    traj_lengths: array_like (int32)
+        number of frames in each trajectory that are part of this collection, in sequence
+    mask: boolean_array ( 8 bit?)
+        false by default
+    
+    Attributes
+    ----------
+    globalIDs: array_like
+    
+    localIDs: array_like
+    
+    frames:  array_like
+    
+    mask:  array_like
+    
+    traj_filepaths: list
+    
+    traj_lenghts: array_like
+    
+    tags: list
+        tags for messages
+    
+    mpi_frametype:
+     MPIFLOAT32
+    
+    
     """
 
-    # ================================================================
-    # Methods for Instantiation
 
     def __init__(self,globalIDs = None, localIDs=None, frames = None, mask = None,
                   traj_filepaths = None, traj_lenghts = None):
         """
-        The basic instantiator.
-        It instantiates all the fields of the object (only to have them all declared in a single place).
-        No other instantiator (or method) should instantiate any new fields.
         
-        Note: No error checking in arguments implemented yet
-        
-        Parameters: globalIDs: array_like (int32)
-                         globalIDs :: global number of the frame
-                    localID: array_like (int32)
-                        local number of the frame
-                        
-                    frames: array_like (float32)
-                            concatenated trajectory frames
-                             
-                    traj_filepath: list  
-                            filepath of trajs in this collections,in sequence
-                            
-                    traj_lengths: array_like (int32)
-                            number of frames in each trajectory that are part of this collection, in sequence
-                            
-                    mask: boolean_array ( 8 bit?)
-                        false by default
-                        
         """
         self.globalIDs = globalIDs #
         self.localIDs  = localIDs
@@ -107,24 +114,27 @@ class Framecollection():
     def from_files(cls, stride, trajectory_type,
                     trajectory_globalID_offsets, trajectory_filepath_list, trajectory_length_list):
         """
-        Public Instantiator. (the only one)
         Instantiate by providing a list of paths to trajectory files,
         a list of the lengths of those trajectories,
         and a list of their globalID offsets (the desired globalID of the first frame of the trajectory)
         and other metadata (stride, trajectory type).
-        
+
         A trajectory reader will be used to load the trajectories,
         loading only every n'th frame, where n = stride, starting with the first.
 
         Each loaded frame will be labelled with a globalID.
-
-
-        Parameters:
-            stride                      :: Integer
-            trajectory_type             :: String
-            trajectory_globalID_offsets :: [Integer]
-            trajectory_filepath_list    :: [String]
-            trajectory_length_list      :: [Integer]
+        
+        Parameters
+        ----------
+        stride                      : Integer
+        trajectory_type             : String
+        trajectory_globalID_offsets : [Integer]
+        trajectory_filepath_list    : [String]
+        trajectory_length_list      : [Integer]
+        
+        Returns
+        -------
+            framecollection object
 
         
         """
@@ -187,9 +197,11 @@ class Framecollection():
     #"""
     def send_to_remote(self, comm, dest_rank):
         """ To transmit all the object's information
-            Parameters:
-                comm: object of Comm class from mpi4py
-                dest_rank: rank of the node to send to
+        
+            Parameters
+            -------------
+            comm: object of Comm class from mpi4py
+            dest_rank: rank of the node to send to
         """
         tag=0
         comm.send([self.frames.shape,self.globalIDs.shape,
@@ -210,15 +222,24 @@ class Framecollection():
         logger.debug("sent to destination %s tag %s",dest_rank,tag)
 
     def for_sending(self, comm):
-        """"""
+        """ returns lambda which needs only rank of the process to send data to
+        
+            Parameters
+            ------------
+            comm: object of Comm class from mpi4py
+            
+            
+        """
         return lambda dest_rank: self.send_to_remote(comm, dest_rank)
 
 
     def receive_from_remote(self, comm, send_rank):
         """ To recieve all the object's information
-            Parameters:
-                comm: object of Comm class from mpi4py
-                send_rank: rank of the node to recieve from
+        
+            Parameters
+            --------------
+            comm: object of Comm class from mpi4py
+            send_rank: rank of the node to recieve from
         """
         tag = 0
         # need to get frame shape before we can receive
@@ -252,12 +273,23 @@ class Framecollection():
         self.global_to_local = self._gen_dict()
     
     def for_receiving(self,comm):
+        """ returns lambda which needs only rank of the process to receive data from
+            
+            Parameters
+            --------------
+            comm: object of Comm class from mpi4py
+        """
+        
         return lambda send_rank: self.receive_from_remote(comm, send_rank)
         
     # ================================================================
     # Array indexing methods.
 
     def get_frame(self, globalID):
+        ''' return frame for a given globalID
+        
+        '''
+        
         try:
             localID = self.global_to_local[globalID]
         except KeyError:
@@ -267,6 +299,8 @@ class Framecollection():
 
 
     def get_frame_pointer(self, globalID):
+        ''' return pointer that points to frame at given globalID
+        '''
         try:
             localID = self.global_to_local[globalID]
         except KeyError:
@@ -276,6 +310,9 @@ class Framecollection():
 
 
     def get_first_frame_pointer(self):
+        ''' return pointer that points to the first frame
+        '''
+        
         try:
             ptr = self.frames[0:].ctypes.data_as(ctypes.POINTER(gp_grompy.c_real))
         except KeyError:
@@ -288,14 +325,22 @@ class Framecollection():
     # Metadata accessor methods.
     @property
     def globalIDs_iter(self):
+        ''' return global id iterator
+        '''
         return iter(self.globalIDs)
     
     @property
     def number_frames(self):
+        ''' return total number of frames
+        '''
+        
         return self.frames.shape[0]
 
     @property
     def number_atoms(self):
+        ''' return number of atoms in a frame
+        '''
+        
         return self.frames.shape[1]
     
     

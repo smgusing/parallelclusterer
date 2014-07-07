@@ -19,6 +19,16 @@ class Gmx_metric(object):
     def __init__(self, tpr_filepath=None, stx_filepath=None, ndx_filepath=None, number_dimensions=3):
         ''' Base class for gromacs based rmsd calculations 
         
+        Parameters
+        ----------------
+            tpr_filepath: str
+                tpr file
+            stx_filepath: str
+                pdb or gro
+            ndx_filepath: str
+                ndx file
+            
+        
         '''
         # --------------------------------
         # Declare all fields.
@@ -117,6 +127,14 @@ class Gmx_metric(object):
     # Also provided is an example function which does this, using broadcasting as an example.
 
     def create_pointers(self):
+        ''' Create pointers to numpy arrays for passing to c function
+        
+        Since we cannot transfer over mpi4py objects which contain C-pointers,
+        these are methods to destroy and create pointers to internal arrays
+        for before and after transfer over mpi4py, respectively.
+
+        
+        '''
 
         self.fitting_indices_ptr = self.fitting_indices.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
         self.fitting_weights_ptr = self.fitting_weights.ctypes.data_as(ctypes.POINTER(gp_grompy.c_real))
@@ -126,6 +144,10 @@ class Gmx_metric(object):
 
 
     def destroy_pointers(self):
+        ''' destroy pointers to numpy arrays.
+            
+            This is required. As objects with pointers cannot be passed around.
+        '''
 
         self.fitting_indices_ptr = None
         self.fitting_weights_ptr = None
@@ -143,13 +165,14 @@ class Gmx_metric(object):
 
     @abc.abstractmethod    
     def compute_distances(self, **args):
-        """
+        """ To compute distance between two frames 
+        
         """
         return
 
     @abc.abstractmethod    
     def count_number_neighbours(self,**args):
-        '''
+        ''' count number of neighbours for frames
         '''
         return
     
@@ -160,19 +183,19 @@ class Gmx_metric(object):
         '''
         return
     
-    @staticmethod
-    def _exampleOnly_mpi_Bcast(metric_obj, comm, root):
-        rank = comm.Get_rank()
-    
-        if rank == root:
-            metric_obj.destroy_pointers()
-        else:
-            metric_obj = None
-    
-        metric_obj = comm.bcast(metric_obj, root=root)
-        metric_obj.create_pointers()
-    
-        return metric_obj
+#    @staticmethod
+#     def _exampleOnly_mpi_Bcast(metric_obj, comm, root):
+#         rank = comm.Get_rank()
+#     
+#         if rank == root:
+#             metric_obj.destroy_pointers()
+#         else:
+#             metric_obj = None
+#     
+#         metric_obj = comm.bcast(metric_obj, root=root)
+#         metric_obj.create_pointers()
+#     
+#         return metric_obj
     
     
         

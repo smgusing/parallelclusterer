@@ -1,11 +1,5 @@
 """
-In-Progress: (not yet started).
-- Switch to arrays of localIDs to store neighbour counts.
-    - When needed, 'translate' them to globalIDs using Container.globalIDs_iter.
-    - Rework allToAll_neighbourCount first.
-    - ! Decided: using arrays complicates things, since dicionaries are so simple.
-                 implement them after more important things,
-                 or when someone can find a way to do it simply.
+
 """
 
 # for Python2
@@ -56,9 +50,27 @@ def print0(msg='',rank=0,msgtype="INFO"):
 
 def cluster(Metric, project_filepath, cutoff, checkpoint_filepath=None,
             flag_nopreprocess = False):
-    """
-    project_filepath :: String   -- The path to the YAML project file.
-    cutoff           :: Floating -- The cutoff distance passed to the Metric class.
+    """ Cluster data
+    
+    Parameters
+    ---------- 
+    project_filepath : String
+       The path to the YAML project file.
+       
+    cutoff           : Floating 
+        The cutoff distance passed to the Metric class.
+        
+    chekpoint_filepath : string,optional
+    flag_nopreprocess : bool,optional
+        switches off preprocessing
+    
+    Returns
+    -------
+    clusters: dict
+        a map (dictionary) from cluster center vertices C to lists of vertices,
+        where the lists represent the set of vertices belonging to the cluster with center C.
+        i.e. a map: FrameID -> [FrameID]
+        
     """
 
     # ================================================================
@@ -185,14 +197,17 @@ def cluster(Metric, project_filepath, cutoff, checkpoint_filepath=None,
 # --------------------------------------------------------------------------------------------------------
 
 def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, metric, my_frames, manager):
-    """
+    """ Does initial all to all comparisions
+    
     The load is divided differently based on whether mpi_size is even or odd
-    In case of odd:
-        This is simple, first each node compare to itself.
-        then to its kth neighbour where k=1 to mpi_size/2
-    In case of even:
-        one node of smaller rank does both self comparisons, while the other node
-        does the outer neigbour count.
+    
+    - In case of odd:
+        --This is simple, first each node compare to itself.
+          then to its kth neighbour where k=1 to mpi_size/2
+    - In case of even:
+        -- one node of smaller rank does both self comparisons, while the other node
+           does the outer neigbour count.
+    
     """
 
     # Init for my frames.
@@ -252,9 +267,10 @@ def allToAll_neighbourCount(cutoff, comm, mpi_size, my_rank, metric, my_frames, 
     return my_neighbour_count
 
 def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_frames):
-    """
-    Notes:
-    - Updates neighbour_count_dict in-place.
+    """ Count neighbours on a given node.
+    
+    .. NOTE:: Inplace update of neighbour_count_dict
+    
     """
     
     frame_array0_idx = np.arange(the_frames.number_frames,dtype=np.int32)
@@ -278,49 +294,11 @@ def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_frames):
             neighbour_count_dict[the_frameID]  = the_count + 1
      
 
-# def innerNeighbourCount(my_metric, cutoff, neighbour_count_dict, the_frames):
-#     """
-#     Notes:
-#     - Updates neighbour_count_dict in-place.
-#     the count buffer relies on reverse counting to properly count number of neighbours
-#     Basically, we are comparining k (outerloop) with i (innerloop)
-#     (where k =n to 0 and  i=0 to n-1) frame , and decrementing n each time.
-#     Each time the_count_buffer[i] is incremented, if k and i are neighbours.
-#     """
-#     the_frame_pointer = the_frames.get_first_frame_pointer()
-#     the_number_atoms  = the_frames.number_atoms
-# 
-#     the_count_buffer = np.zeros(the_frames.number_frames, dtype=np.int32)
-#     
-#     for iter_limit, the_frameID in reversed(list(enumerate(the_frames.globalIDs_iter))):
-#         neighbour_count = my_metric.count_number_neighbours( 
-#             cutoff                  = cutoff,
-#             reference_frame_pointer = the_frames.get_frame_pointer(the_frameID),
-#             frame_array_pointer     = the_frame_pointer,
-#             number_frames           = iter_limit, # Check only until the_frameID
-#             number_atoms            = the_number_atoms,
-#             int_output_buffer       = the_count_buffer,
-#             )
-# 
-#         try:
-#             neighbour_count_dict[the_frameID] += neighbour_count
-#         except KeyError:
-#             neighbour_count_dict[the_frameID]  = neighbour_count
-# 
-#     for the_frameID, the_count in zip(the_frames.globalIDs_iter, the_count_buffer):
-#         # Because of iter_limit, no frame is compared with itself, so add it here.
-#         try:
-#             neighbour_count_dict[the_frameID] += the_count + 1 
-#             #neighbour_count_dict[the_frameID] += the_count 
-#         except KeyError:
-#             neighbour_count_dict[the_frameID]  = the_count + 1
-#             #neighbour_count_dict[the_frameID]  = the_count
-                
-
 def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_received_frames):
-    """
-    Notes:
-    - Updates neighbour_count_dict in-place.
+    """ count neigbours between two frame collections
+    
+    .. NOTE:: Inplace update of neighbour_count_dict
+    
     """
 
     frame_array0_idx = np.arange(my_frames.number_frames,dtype=np.int32)
@@ -362,14 +340,21 @@ def outerNeighbourCount(my_metric, cutoff, neighbour_count_dict, my_frames, my_r
 def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
                      metric, my_frames, checkpoint_filepath):
     
-    '''
-    Daura clustering.
+    ''' Impliments Daura clustering.
+    
     - Define the largest cluster to be the set of vertices adjacent to the vertex with maximum degree.
     - Clustering is performed by identifying the largest cluster,
       assigning its vertices to one cluster, removing its vertices from the graph,
       and repeating the process.
-    - Note: the terms 'frame' and 'vertex' are interchanged:
-        the frames are the objects being clustered; we imagine the frames as vertices of a graph.
+      
+     Returns
+     -------
+     Clusters: dict
+        a map (dictionary) from cluster center vertices C to lists of vertices,
+        where the lists represent the set of vertices belonging to the cluster with center C.
+        i.e. a map: FrameID -> [FrameID]
+           
+      
     '''
 
 
@@ -393,10 +378,6 @@ def daura_clustering(neighbour_counts, cutoff, comm, mpi_size, my_rank, manager,
             - localIDs are with respect to the container,
                 i.e. they are determined by the container's localIDs mapping.
         (perhaps this should be merged into the container class?)
-    - clusters:
-        a map (dictionary) from cluster center vertices C to lists of vertices,
-        where the lists represent the set of vertices belonging to the cluster with center C.
-        i.e. a map: FrameID -> [FrameID]
     """
     mask_removed_vertices = np.zeros(my_frames.number_frames, dtype=np.int32)
     mask_removed_vertices_ptr = mask_removed_vertices.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
@@ -625,9 +606,8 @@ def read_checkpoint(filepath):
 # Something to change the formatting of the cluster data.
 
 def cluster_dict_to_text(clusters, centers_filepath, clusters_filepath):
-    """
-    clusters :: Dict globalID [globalID]
-        (keys are cluster centers, values are frames within the cluster (including the cluster center)
+    """ write clusters and centers to given files
+    
     """
 
     frames_to_clusters = {} # :: frameID -> clusterID

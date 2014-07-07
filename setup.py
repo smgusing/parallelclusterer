@@ -24,7 +24,7 @@ metadata = {
     'license': 'GPL version 2 or later',
     'author_email': 'togurpreet@gmail.com',
     'url': 'https://sites.google.com/site/togurpreet/Home',
-    'install_requires': ['numpy','pyyaml','gp_grompy'],
+    #'install_requires': ['numpy','pyyaml','gp_grompy'],
     'platforms': ["Linux"],
     'description': "parallel clustering in python",
     'long_description': """

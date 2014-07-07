@@ -19,27 +19,18 @@ logger = logging.getLogger(__name__)
 # ================================================================
 
 class Gmx_metric_rmsd(Gmx_metric):
-    """
-    A Metric class for clustering.
-    The metric between frames: least-rmsd allowing for rotation and translation.
+    """ A Metric class for clustering.
 
-    Metric classes must implement:
-    - preprocess()
-    - oneToMany_distance()
-    - oneToMany_countWithinCutoff() # because it's faster (and also parallel) in C.
-
-    Notes:
-    - Ctypes knows how to do basic conversions, like converting Python floats/ints to C floats/ints.
-    - I'm not yet thinking about making an interface for Metric classes,
-      so then I'm creating whatever distance analysis methods I want!
-      Especially since it's difficult to do things externally of C functions,
-      since Python is both slow and single-threaded.
     """
+    
     
     def __init__(self, tpr_filepath=None, stx_filepath=None, ndx_filepath=None, number_dimensions=3):
         """
         Obtains all information about the frames that is required to perform the metric computation.
         No other information is gathered at a later time.
+        
+        The metric between frames: least-rmsd allowing for rotation and translation.
+    
         """
         super(Gmx_metric_rmsd,self).__init__(tpr_filepath,stx_filepath,ndx_filepath,number_dimensions)
         
@@ -62,6 +53,37 @@ class Gmx_metric_rmsd(Gmx_metric):
     def compute_distances(self, reference_frame_pointer, frame_array_pointer,
                             number_frames, number_atoms, real_output_buffer,
                             mask_ptr=None, mask_dummy_value=0.0):
+        ''' compute distances
+         
+         Parameters
+         ---------------
+         reference_frame_pointer : pointer
+             pointer to reference frame
+             
+         frame_array_pointer : pointer
+             pointer to traj array
+             
+         number_frames : int
+             
+         number_atoms : int
+             
+         real_output_buffer : array
+             array collecting number of neighbours  
+         
+         mask_ptr : pointer
+             pointer to array containing masked indicies
+             
+         mask_dummy_value :
+         
+         Return
+         --------
+         None
+         
+         Modifies real_output_buffer
+         
+        '''
+
+        
                             # making new arguments have default values to prevent breaking
                             # but we should eventually properly update all calls to the function
         
@@ -78,8 +100,9 @@ class Gmx_metric_rmsd(Gmx_metric):
     def count_number_neighbours(self, cutoff, reference_frame_pointer, frame_array_pointer, 
                                 number_frames, number_atoms, int_output_buffer,
                                 mask_ptr=None):
-                                # making new arguments have default values to prevent breaking
-                                # but we should eventually properly update all calls to the function
+        ''' Count number of neighbours 
+        
+        '''
 
         cutoff_c = gp_grompy.c_real(cutoff)
         int_output_buffer_ptr = int_output_buffer.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
@@ -96,8 +119,16 @@ class Gmx_metric_rmsd(Gmx_metric):
             frame_array0_number, frame_array1_number, frame_array0_idx,
             frame_array1_idx,frame_array0_count,frame_array1_count,
             frame_array0_idxsize,frame_array1_idxsize, number_atoms):
-            # making new arguments have default values to prevent breaking
-            # but we should eventually properly update all calls to the function
+        
+        ''' Count neighbours between two trajectories
+        
+        Return
+        ----------
+        None
+        
+        Modifies frame_array_0_count and frame_array_1_count
+        
+        '''
 
         cutoff_c = gp_grompy.c_real(cutoff)
         frame_array0_number_c = ctypes.c_int(frame_array0_number)
@@ -123,8 +154,16 @@ class Gmx_metric_rmsd(Gmx_metric):
     def count_neighbours_within(self, cutoff, frame_array0_pointer, 
             frame_array0_number, frame_array0_idx,frame_array0_count,
             frame_array0_idxsize,number_atoms):
-            # making new arguments have default values to prevent breaking
-            # but we should eventually properly update all calls to the function
+        ''' Count neighbours within a trajectory
+        
+        Return
+        ---------
+        None:
+        
+        Inplace modification of frame_array0_count
+        
+        
+        '''
 
         cutoff_c = gp_grompy.c_real(cutoff)
         frame_array0_number_c = ctypes.c_int(frame_array0_number)
@@ -133,7 +172,19 @@ class Gmx_metric_rmsd(Gmx_metric):
         frame_array0_idxsize_c = ctypes.c_int(frame_array0_idxsize)
         number_atoms_c         = ctypes.c_int(number_atoms)
         
-        cmetric.manytomany_within(
+        cmetric.manytomany_within.argtypes = [gp_grompy.c_real, ctypes.POINTER(gp_grompy.c_real),
+                                              ctypes.c_int,
+                                              ctypes.POINTER(ctypes.c_int),
+                                              ctypes.POINTER(ctypes.c_int),
+                                              ctypes.c_int,
+                                              ctypes.c_int, ctypes.c_int, ctypes.POINTER(gp_grompy.c_real),
+                                              ctypes.POINTER(ctypes.c_int), ctypes.POINTER(gp_grompy.c_real), ctypes.c_int,
+                                              ]
+        
+        cmetric.manytomany_within.argtypes = None 
+        
+        
+        res = cmetric.manytomany_within(
             cutoff_c, frame_array0_pointer,  
             frame_array0_number_c, 
             frame_array0_idx_ptr, 
