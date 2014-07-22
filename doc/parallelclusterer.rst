@@ -1,100 +1,102 @@
-parallelclusterer Package
+parallelclusterer package
 =========================
 
+Submodules
+----------
 
-:mod:`parallelclusterer` Package
---------------------------------
-
-.. automodule:: parallelclusterer.__init__
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
-:mod:`daura_clustering` Module
-------------------------------
+parallelclusterer.daura_clustering module
+-----------------------------------------
 
 .. automodule:: parallelclusterer.daura_clustering
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`error_reporting` Module
------------------------------
+parallelclusterer.error_reporting module
+----------------------------------------
 
 .. automodule:: parallelclusterer.error_reporting
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`framecollection` Module
------------------------------
+parallelclusterer.framecollection module
+----------------------------------------
 
 .. automodule:: parallelclusterer.framecollection
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`gmx_metric` Module
-------------------------
+parallelclusterer.gmx_metric module
+-----------------------------------
 
 .. automodule:: parallelclusterer.gmx_metric
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`gmx_metric_custom1` Module
---------------------------------
+parallelclusterer.gmx_metric_custom1 module
+-------------------------------------------
 
 .. automodule:: parallelclusterer.gmx_metric_custom1
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`gmx_metric_rmsd` Module
------------------------------
+parallelclusterer.gmx_metric_rmsd module
+----------------------------------------
 
 .. automodule:: parallelclusterer.gmx_metric_rmsd
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`loadmanager` Module
--------------------------
+parallelclusterer.loadmanager module
+------------------------------------
 
 .. automodule:: parallelclusterer.loadmanager
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`project` Module
----------------------
+parallelclusterer.project module
+--------------------------------
 
 .. automodule:: parallelclusterer.project
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`trajectory_reader` Module
--------------------------------
+parallelclusterer.trajectory_reader module
+------------------------------------------
 
 .. automodule:: parallelclusterer.trajectory_reader
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`txtreader` Module
------------------------
+parallelclusterer.txtreader module
+----------------------------------
 
 .. automodule:: parallelclusterer.txtreader
     :members:
     :undoc-members:
     :show-inheritance:
 
-:mod:`utils` Module
--------------------
+parallelclusterer.utils module
+------------------------------
 
 .. automodule:: parallelclusterer.utils
     :members:
     :undoc-members:
     :show-inheritance:
 
+
+Module contents
+---------------
+
+.. automodule:: parallelclusterer
+    :members:
+    :undoc-members:
+    :show-inheritance:
