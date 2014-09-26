@@ -93,9 +93,10 @@ class Gmx_metric(object):
             j = gmndx.index[1][i]
             self.fitting_indices[i] = j
             
-        if os.path.isfile(tpr_filepath):
-            # Read topology file.
-            gmstx.read_tpr(tpr_filepath)
+        if tpr_filepath is not None:
+            if os.path.isfile(tpr_filepath):
+                # Read topology file.
+                gmstx.read_tpr(tpr_filepath)
             
             self.rms_weights = np.zeros(gmstx.natoms, dtype=np.float32)
             self.fitting_weights = np.zeros(gmstx.natoms, dtype=np.float32)

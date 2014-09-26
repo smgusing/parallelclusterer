@@ -21,7 +21,7 @@ parser.add_argument("--gro", dest='gro_filepath', default='nr.gro',
 parser.add_argument("--ndx", dest='ndx_filepath', default='nr.ndx',
                     help='index file')
 
-parser.add_argument("--tpr", dest='tpr_filepath', default='nr.tpr',
+parser.add_argument("--tpr", dest='tpr_filepath', default='null.tpr',
                     help='tpr file')
 
 parser.add_argument("--ndim", dest='number_dimensions', help='number of dimensions',

@@ -16,7 +16,6 @@ gmxdir=${gmxdir%/bin/mdrun}
 echo Gromacs directory $gmxdir
 incdir=$gmxdir/include/gromacs
 libdir="$gmxdir/lib"
-pkg_path=${install_dir}/lib/python2.7/site-packages/parallelclusterer
 
 function clean {
 echo "Will clean the installation"
@@ -24,10 +23,7 @@ sleep 1
 ## Unless deleted manually, pip is unable to clear all the crap
 ## so here I am deleting almost all the files manually
 ## the files in the bin are not cleared
-#yes | pip uninstall parallelclusterer
-rm -rvf build
-rm -rvf $pkg_path
-rm -rvf doc/_build doc/_static doc/_templates
+yes | pip uninstall parallelclusterer
 }
 
 function inst {
@@ -41,26 +37,10 @@ python setup.py install --prefix $install_dir
 
 function doc {
 # In order to build the documentation the path to the installed package $pkg_path should be set
+pkg_path=${install_dir}/lib/python2.7/site-packages/parallelclusterer
 sphinx-apidoc $pkg_path -o doc --full
 cd doc; make html
 
 }
-
-case $1 in
-   clean)
-   clean
-   ;;
-
-   install)
-   inst
-   ;;
-
-   doc)
-   doc
-   ;;
-
-   *)
-    echo $"Usage: $0 {clean|install|doc}"
-    exit 1
-esac
- 
+inst
+doc

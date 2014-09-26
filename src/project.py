@@ -162,7 +162,7 @@ or by providing the files for a new project.
         # Set topologies.
         self.gro_filepath = gro_filepath
         self.ndx_filepath = ndx_filepath
-        self.tpr_filepath = self.get_tpr_filepath()
+        self.tpr_filepath = tpr_filepath
 
         # Set trajectory type.
         self.trajectory_type = trajectory_type
@@ -260,10 +260,7 @@ or by providing the files for a new project.
         return self.ndx_filepath
     
     def get_tpr_filepath(self):
-        if self.tpr_filepath == "None":
-            return None
-        else:
-            return self.tpr_filepath
+        return self.tpr_filepath
 
     def get_number_dimensions(self):
         return self.number_dimensions
