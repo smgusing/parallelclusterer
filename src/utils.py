@@ -17,7 +17,7 @@ from framecollection import Framecollection
 import logging
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("parallelclusterer")
 # #POINTERTYPES
 c_int_p = POINTER(c_int)
 c_real_p = POINTER(c_real)
@@ -58,7 +58,7 @@ class Utilities():
                  clcenterfn="centers.txt",
                  clusterfn="clusters.txt",
                  stepsize=None, timestep=None, 
-                 stride=1,flag_nopreprocess=False):
+                 flag_nopreprocess=False):
         '''
         load the project information and cluster output
         '''
@@ -93,6 +93,7 @@ class Utilities():
         
         self.stepsize = stepsize
         self.timestep = timestep
+        logger.debug("Dimensionality %d",self.ndim)
 
     def  get_clustermembers(self, clid):
         """ returns cluster members of a given clusterid
@@ -205,7 +206,7 @@ class Utilities():
             randomindices = np.arange(self.nodesizes[clid])
         outf = "clid_%s.xtc" % clid
     
-        logger.debug("Loading Rest of  %s members",clid)
+        logger.debug("Loading Rest of  clid %s members",clid)
         # ##Now load the rest
         for i,rindex in enumerate(randomindices):
             trajno, timefr = trajnos[rindex], timefrs[rindex]
@@ -236,7 +237,6 @@ class Utilities():
                                 number_dimensions=self.ndim)
         
         
-        
         if flag_nopreprocess == False:
             logger.info("will do preprocessing")
             metric.preprocess(
@@ -246,16 +246,13 @@ class Utilities():
         
         rmsd = np.zeros(len(traj), dtype=np.float32)
         metric.fit_trajectory(traj_container, 0, rmsd)
-
-        np.savetxt('rmsd.txt', rmsd)
+        rmsdoutf=outf.replace(".xtc","_rmsd.txt")
+        np.savetxt(rmsdoutf, rmsd)
         gxout.write_array_as_traj(outf, traj_container.frames, boxs, times, prec)
 
 
     def print_clustersizes(self):
         np.savetxt("clsize.txt",self.nodesizes)
-
-    
-
 
 
     def _get_assignments(self):

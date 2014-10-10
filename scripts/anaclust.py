@@ -7,7 +7,7 @@ import parallelclusterer as pcl
 from parallelclusterer.gmx_metric_rmsd import Gmx_metric_rmsd
 from parallelclusterer.gmx_metric_custom1 import Gmx_metric_custom1
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("parallelclusterer")
 
     
 parser = argparse.ArgumentParser(description='''
@@ -15,9 +15,6 @@ parser = argparse.ArgumentParser(description='''
 ''',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 parser.add_argument("-projfn",dest='projfn',default='Proj.yaml',help='Project file')
-
-parser.add_argument( "-stride",dest='stride', help='Subsample by striding',
-    default=1, type=int)
 
 parser.add_argument( "-timestep",dest='timestep', help='timestep for traj dumping (in ps)',
     type=float,required=True)
@@ -114,7 +111,6 @@ def main(args):
                     clusterfn=args.cltagsfn,
                     stepsize=args.stepsize,
                     timestep=args.timestep,
-                    stride=args.stride, 
                     flag_nopreprocess=args.no_preprocess )
     
     if args.bSize == True:

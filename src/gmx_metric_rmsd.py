@@ -44,9 +44,9 @@ class Gmx_metric_rmsd(Gmx_metric):
         Translates a frame's atoms so that the center of mass is the origin.
         (In-place modification.)
         """
-
+        logger.debug("Preprocessing with rotation + translation in %d Dimensions",self.number_dimensions_c.value)
         cmetric.parallelFor_removeCenterOfMass( # C function.
-            frame_array_pointer, number_frames, number_atoms, self.number_dimensions,
+            frame_array_pointer, number_frames, number_atoms, self.number_dimensions_c,
             self.fitting_size, self.fitting_indices_ptr, self.fitting_weights_ptr)
 
 
@@ -92,7 +92,7 @@ class Gmx_metric_rmsd(Gmx_metric):
 
         cmetric.oneToMany_computeRmsd( # C function.
             reference_frame_pointer, frame_array_pointer, number_frames, number_atoms,
-            self.number_dimensions, self.fitting_weights_ptr, self.rms_indices_ptr, self.rms_weights_ptr,
+            self.number_dimensions_c, self.fitting_weights_ptr, self.rms_indices_ptr, self.rms_weights_ptr,
             self.rms_size, real_output_buffer_ptr,
             mask_ptr, c_mask_dummy_value)
 
@@ -109,7 +109,7 @@ class Gmx_metric_rmsd(Gmx_metric):
 
         count = cmetric.oneToMany_countWithinRmsd( # C function.
             cutoff_c, int_output_buffer_ptr, reference_frame_pointer, frame_array_pointer,
-            number_frames, number_atoms, self.number_dimensions, self.fitting_weights_ptr,
+            number_frames, number_atoms, self.number_dimensions_c, self.fitting_weights_ptr,
             self.rms_indices_ptr, self.rms_weights_ptr, self.rms_size,
             mask_ptr)
 
@@ -206,7 +206,7 @@ class Gmx_metric_rmsd(Gmx_metric):
         
         cmetric.distance_onetomany( # C function.
             reference_frame_pointer, frame_array_pointer, traj_container.number_frames, 
-            traj_container.number_atoms, self.number_dimensions, self.fitting_weights_ptr,
+            traj_container.number_atoms, self.number_dimensions_c, self.fitting_weights_ptr,
             self.rms_indices_ptr, self.rms_weights_ptr,
             self.rms_size, real_output_buffer_ptr)
         

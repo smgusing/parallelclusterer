@@ -49,7 +49,7 @@
  #include <omp.h>
                                         
  #define EPS 1.0e-09   
-
+ #define DIM 3
  /*
     Alex:
     - Removed dependencies on some simple GROMACS macros, functions
@@ -82,9 +82,13 @@ void removeCenterOfMass(
     real mass;
 
     set_rvec_to_zero(mass_vector_accumulator);
-
     // Sum 'mass-vectors'.
     if (domain_indices != NULL) { // If we are given a subset of indices, use only those.
+//    	printf("id %d \n ", omp_get_thread_num() );
+//        if (omp_get_thread_num() == 0){
+//        	printf("Before mass %f Z: %f \n ",masses[domain_indices[0]] ,object_frame[domain_indices[0]][2] );
+//        }
+
         for(i = 0; i < domain_size; i++) {
             j = domain_indices[i];
             for(dim = 0; dim < number_dimensions; dim++) {
@@ -116,6 +120,10 @@ void removeCenterOfMass(
             j = shift_indices[i];
             rvec_inplace_add(object_frame[j], shift_vector);
         }
+//        if (omp_get_thread_num() == 0){
+//        	printf("After mass %f Z: %f \n ",masses[domain_indices[0]] ,object_frame[domain_indices[0]][2] );
+//        }
+
     }
     else { // Otherwise, shift only the first 'shift_size' vectors.
         for(j = 0; j < shift_size; j++) {
@@ -140,7 +148,7 @@ void parallelFor_removeCenterOfMass( // *** Changed Name
         total_mass += fitting_weights[fitting_indices[i]];
     }
 
-    #pragma omp parallel for default(shared) private(i, object_frame)
+    //#pragma omp parallel for default(shared) private(i, object_frame)
     for (i = 0; i < frame_array_size; i++) {
         object_frame = frame_array + (i * number_atoms);
         removeCenterOfMass(object_frame, number_dimensions, fitting_weights, total_mass, fitting_size,
@@ -172,16 +180,17 @@ real computeRmsd(rvec *frame0, rvec *frame1, int number_atoms, int number_dimens
         } else {
             j = i;
         }
-
-        for (n = 0; n < number_dimensions; n++) {
+        //set_rvec_to_zero(rotated);
+        for (n = 0; n < DIM; n++) {
             rotated[n] = 0.0;
-            for (m = 0; m < number_dimensions; m++) {
+            for (m = 0; m < DIM; m++) {
                 rotated[n] += rotation_matrix[n][m] * frame1[j][m];
             }
         }
 
         // Find rmsd between frame 0 and rotated frame 1.
-        for (n = 0; n < number_dimensions; n++) {
+        //for (n = 0; n < number_dimensions; n++) {
+		for (n = 0; n < DIM; n++) {
             dx = frame0[j][n] - rotated[n];
             rmsd_acc += rms_weights[j] * dx * dx;
         }
