@@ -64,6 +64,8 @@ class Gmx_metric(object):
         if ndx_filepath is not None:
             if os.path.isfile(ndx_filepath):
                 # Read index file.
+                print ('''Select Two groups:first group specifies the atoms between which the rmsd is computed.\n
+                 The second group specifies the atoms of frames which will be aligned in rotation fitting''')
                 gmndx.read_index(ndx_filepath, number_of_index_groups) # Runs interactive mode for input. (GROMCAS)
             else:
                 logger.error("cannot find %s",ndx_filepath)
@@ -93,10 +95,8 @@ class Gmx_metric(object):
             j = gmndx.index[1][i]
             self.fitting_indices[i] = j
             
-        if tpr_filepath is not None:
-            if os.path.isfile(tpr_filepath):
-                # Read topology file.
-                gmstx.read_tpr(tpr_filepath)
+        if os.path.isfile(tpr_filepath):
+            gmstx.read_tpr(tpr_filepath)
             
             self.rms_weights = np.zeros(gmstx.natoms, dtype=np.float32)
             self.fitting_weights = np.zeros(gmstx.natoms, dtype=np.float32)

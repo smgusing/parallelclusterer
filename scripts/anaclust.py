@@ -19,9 +19,6 @@ parser.add_argument("-projfn",dest='projfn',default='Proj.yaml',help='Project fi
 parser.add_argument( "-timestep",dest='timestep', help='timestep for traj dumping (in ps)',
     type=float,required=True)
 
-parser.add_argument( "-ndim",dest='ndim', help='number of dimensions for fitting (2 or 3) Z is not included in 2',
-    default=3, type=int)
-
 parser.add_argument( "-stepsize",dest='stepsize', help='number of integration steps per recorded observeration',
      required=True,type=int)
 

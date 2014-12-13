@@ -235,8 +235,6 @@ class Utilities():
                                 ndx_filepath=self.ndxf, 
                                 stx_filepath = self.grof,
                                 number_dimensions=self.ndim)
-        
-        
         if flag_nopreprocess == False:
             logger.info("will do preprocessing")
             metric.preprocess(
@@ -306,6 +304,8 @@ class Utilities():
         """
         # # Get input data
         gx = Gmxtc()
+        no_preprocess = False
+
         stride = 1
         bPBC = None
         traj = gx.load_traj(xtcfile, stride, bPBC, nframes)
