@@ -166,8 +166,9 @@ real computeRmsd(rvec *frame0, rvec *frame1, int number_atoms, int number_dimens
     matrix rotation_matrix;
     
     // Compute the rotation that rotates frame1 to best fit frame0.
-    calc_fit_R(number_dimensions, number_atoms, fitting_weights,
-               frame0, frame1, rotation_matrix); // GROMACS
+    // commenting out the rotation part
+    //calc_fit_R(number_dimensions, number_atoms, fitting_weights,
+    //           frame0, frame1, rotation_matrix); // GROMACS
 
     int i, j, n, m;
     real dx, total_mass = 0.0, rmsd_acc = 0.0;
@@ -181,17 +182,17 @@ real computeRmsd(rvec *frame0, rvec *frame1, int number_atoms, int number_dimens
             j = i;
         }
         //set_rvec_to_zero(rotated);
-        for (n = 0; n < DIM; n++) {
-            rotated[n] = 0.0;
-            for (m = 0; m < DIM; m++) {
-                rotated[n] += rotation_matrix[n][m] * frame1[j][m];
-            }
-        }
+        //for (n = 0; n < DIM; n++) {
+        //    rotated[n] = 0.0;
+            //for (m = 0; m < DIM; m++) {
+            //    rotated[n] += rotation_matrix[n][m] * frame1[j][m];
+            //}
+        //}
 
         // Find rmsd between frame 0 and rotated frame 1.
         //for (n = 0; n < number_dimensions; n++) {
-		for (n = 0; n < DIM; n++) {
-            dx = frame0[j][n] - rotated[n];
+	for (n = 0; n < DIM; n++) {
+            dx = frame0[j][n] - frame1[j][n];
             rmsd_acc += rms_weights[j] * dx * dx;
         }
 
@@ -400,8 +401,8 @@ void distance_onetomany(
     #pragma omp parallel for default(shared) private(i,object_frame)
     for (i = 0; i < frame_array_size; i++) {
         object_frame = frame_array + (i * number_atoms);
-        do_fit_ndim(number_dimensions, number_atoms, fitting_weights,
-        		reference_frame, object_frame); // GROMACS
+        //do_fit_ndim(number_dimensions, number_atoms, fitting_weights,
+        //		reference_frame, object_frame); // GROMACS
         rmsd[i] = rmsdev_ind(rms_size, rms_indices, rms_weights,
         		  reference_frame, object_frame ); // GROMACS
     }
