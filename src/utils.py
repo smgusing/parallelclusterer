@@ -262,7 +262,7 @@ class Utilities():
     
         """
         assgn_list = split(self.cltags[:,1], self.frames_per_traj)
-        output = -1 * np.ones((len(self.trajs_lengths), max(self.trajs_lengths)), dtype='int')
+        output = -1 * np.ones((len(self.trajs_lengths), max(self.frames_per_traj)), dtype='int')
         for i, traj_assign in enumerate(assgn_list):
             output[i][0:len(traj_assign)] = traj_assign
         return output
@@ -374,10 +374,9 @@ class Utilities():
 
 #############################################################################################
     def write_msm_output(self,outarray=None,filename="Assignments.h5"):
-        from msmbuilder import io
         if outarray is None:
             outarray = self.assignments
-        io.saveh(filename,outarray)
+        np.savez(filename,outarray)
         
     def dump_count_matrix(self,assignfn,lagtime=1,outfn="count_matrix.txt"):
         from msmbuilder import io
